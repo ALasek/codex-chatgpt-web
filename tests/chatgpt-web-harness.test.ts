@@ -904,7 +904,9 @@ describe("ChatGPT outer-native harness v4", () => {
   });
 
   test("steering retires a browser waiting for an old tool result and rejects late older requests", async () => {
-    const sessions = new ChatGptTurnSessions();
+    const diagnostics: Array<{ event: string; fields: Record<string, string | boolean> }> = [];
+    const sessions = new ChatGptTurnSessions(undefined, undefined,
+      (event, fields) => diagnostics.push({ event, fields }));
     const original = rawWireRequest(environmentXml);
     const originalInput = (original._rawBody as { input: Array<Record<string, unknown>> }).input;
     originalInput.at(-1)!.id = "msg_original";
@@ -938,6 +940,15 @@ describe("ChatGPT outer-native harness v4", () => {
     const next = sessions.getOrCreateAfterOwnerRetirement(newKey, "thread", replacement,
       "new-trace", undefined, "native-turn", "native-thread", chatGptInstructionLineage(steered));
     expect(cancellations).toHaveLength(1);
+    expect(diagnostics).toEqual([{
+      event: "browser.turn_steered",
+      fields: {
+        previousTraceId: "old-trace",
+        replacementTraceId: "new-trace",
+        sameNativeTurn: true,
+        sameNativeThread: true,
+      },
+    }]);
     expect(starts).toBe(0);
     expect(sessions.cancelledError("old-trace")).toMatchObject({ code: "client_cancelled" });
     cleanup();

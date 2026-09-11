@@ -2084,6 +2084,7 @@ test("a later provider round reuses only its exact connector-bound conversation"
     },
   };
   const events = [];
+  const diagnostics = [];
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
     manualOperation: null,
     turnTabs: new Map([[tab.id, tab]]),
@@ -2093,7 +2094,7 @@ test("a later provider round reuses only its exact connector-bound conversation"
     snapshot: () => ({ tabs: [] }),
     publishState: () => events.push("published"),
     writeDescriptor: () => events.push("descriptor"),
-    logger: { info: (event) => events.push(event) },
+    logger: { info: (event, fields) => { events.push(event); diagnostics.push({ event, fields }); } },
   });
 
   const lease = await BrowserHost.prototype.beginTurn.call(
@@ -2120,6 +2121,16 @@ test("a later provider round reuses only its exact connector-bound conversation"
   assert.equal(fixture.selectedTabId, tab.id);
   assert.deepEqual(throttling, [false]);
   assert.deepEqual(events, ["visible", "published", "descriptor", "browser.tab_reused"]);
+  assert.deepEqual(diagnostics.at(-1), {
+    event: "browser.tab_reused",
+    fields: {
+      tabId: "tab-reused",
+      traceId: "trace_next",
+      previousTraceId: "trace_previous",
+      selection: "retained-conversation",
+      conversationKeyPresent: true,
+    },
+  });
 });
 
 test("a retained conversation is not reused for a different connector identity", async () => {
@@ -2134,6 +2145,7 @@ test("a retained conversation is not reused for a different connector identity",
     interactionMode: "automatic",
   };
   const created = { id: "fresh", surfaceId: "surface-fresh" };
+  const diagnostics = [];
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
     manualOperation: null,
     turnTabs: new Map([[retained.id, retained]]),
@@ -2146,7 +2158,7 @@ test("a retained conversation is not reused for a different connector identity",
     syncViewVisibility() {},
     publishState() {},
     snapshot: () => ({ tabs: [] }),
-    logger: { info() {} },
+    logger: { info: (event, fields) => diagnostics.push({ event, fields }) },
   });
 
   const lease = await BrowserHost.prototype.beginTurn.call(
@@ -2165,6 +2177,16 @@ test("a retained conversation is not reused for a different connector identity",
     connectorBound: false,
   });
   assert.equal(retained.status, "ready");
+  assert.deepEqual(diagnostics.at(-1), {
+    event: "browser.tab_created",
+    fields: {
+      tabId: "fresh",
+      traceId: "trace_next",
+      tabCount: 1,
+      selection: "new-conversation",
+      conversationKeyPresent: true,
+    },
+  });
 });
 
 test("an Automatic turn never reuses a retained Zero Risk conversation", async () => {

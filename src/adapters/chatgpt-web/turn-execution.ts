@@ -503,6 +503,9 @@ export class ChatGptTurnSessions {
   constructor(
     private readonly ttlMs = 30 * 60_000,
     private readonly maxEntries = 256,
+    private readonly diagnostic: (event: string, fields: Record<string, string | boolean>) => void = (event, fields) => {
+      console.info(`[chatgpt-web] ${event} ${Object.entries(fields).map(([key, value]) => `${key}=${value}`).join(" ")}`);
+    },
   ) {}
 
   getOrCreate(
@@ -571,6 +574,12 @@ export class ChatGptTurnSessions {
           // its capability and rebuild from the complete canonical history, including that result.
           // Keep the old entry terminal so a delayed replay cannot restart superseded work.
           const reason = chatGptTurnSupersededError();
+          this.diagnostic("browser.turn_steered", {
+            previousTraceId: ownedSession.traceId ?? "unknown",
+            replacementTraceId: traceId ?? "unknown",
+            sameNativeTurn: ownedSession.nativeTurnId === nativeTurnId,
+            sameNativeThread: ownedSession.nativeThreadId === nativeThreadId,
+          });
           ownedSession.supersededError = reason;
           this.forgetConversationHead(ownedSession);
           await awaitWithAbort(this.beginRetirement(ownedKey, ownedSession, reason), signal);

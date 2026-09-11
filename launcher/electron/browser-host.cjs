@@ -2240,6 +2240,7 @@ class BrowserHost {
     const existing = sameTrace?.status === "running" ? sameTrace : exactRetained;
     if (existing) {
       const reused = existing.status === "ready";
+      const previousTraceId = existing.traceId;
       if (existing.status === "running" && existing.helperPid !== helperPid) {
         if (processRunning(existing.helperPid)) {
           throw new Error(`ChatGPT browser turn ${traceId} is owned by another helper process`);
@@ -2270,7 +2271,13 @@ class BrowserHost {
       else this.syncViewVisibility();
       this.publishState?.(this.snapshot());
       this.writeDescriptor();
-      this.logger.info("browser.tab_reused", { tabId: existing.id, traceId });
+      this.logger.info("browser.tab_reused", {
+        tabId: existing.id,
+        traceId,
+        previousTraceId,
+        selection: reused ? "retained-conversation" : "same-turn",
+        conversationKeyPresent: Boolean(conversationKey),
+      });
       return {
         surfaceId: existing.surfaceId,
         tabId: existing.id,
@@ -2288,7 +2295,13 @@ class BrowserHost {
     if (reveal) this.show();
     else this.syncViewVisibility();
     this.publishState?.(this.snapshot());
-    this.logger.info("browser.tab_created", { tabId: tab.id, traceId, tabCount: this.turnTabs.size });
+    this.logger.info("browser.tab_created", {
+      tabId: tab.id,
+      traceId,
+      tabCount: this.turnTabs.size,
+      selection: "new-conversation",
+      conversationKeyPresent: Boolean(conversationKey),
+    });
     this.writeDescriptor();
     return { surfaceId: tab.surfaceId, tabId: tab.id, reused: false, connectorBound: false };
   }
