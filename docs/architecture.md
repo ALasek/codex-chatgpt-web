@@ -125,8 +125,9 @@ The pasted task carries one opaque `request_id` for routing concurrent requests.
 sequencing lives in the Zero Risk MCP server metadata, not in user-authored imperative text; the
 per-tab nonce used to validate the Launcher confirmation never leaves the local runtime.
 
-The appended models advertise the authenticated account's context window and a ten-percent
-auto-compaction reserve. Usage is counted with the GPT-5 tokenizer plus fixed platform/image
+The appended models advertise the authenticated account's context window and a conservative
+auto-compaction reserve. Plus Medium/High pre-compacts at 60,000 tokens after a real 77,000-token
+inline handoff made the ChatGPT renderer unresponsive. Usage is counted with the GPT-5 tokenizer plus fixed platform/image
 reserves, rather than inferred from character length. The ChatGPT composer also has an independent
 inline-size boundary: usage accounting asks Codex to compact before that boundary, and a prompt
 that still exceeds the proven hard ceiling fails explicitly before any browser turn opens.
@@ -140,18 +141,20 @@ the execution contract and any output schema. Their reserves are deducted before
 then preflight checks the actual compiled messages and total transaction. The selected execution
 effort, attachment references and three-part maximum remain unchanged.
 
-In Full mode, routed compaction v1/v2 uses the exact retained source agent and a one-shot MCP control
-capability that accepts only the bound checkpoint; it cannot claim or invoke the ordinary Codex tool
-environment. Zero Risk always advertises a fixed three-times compaction interval without enabling
+In production Automatic mode, routed v1 compaction never opens ChatGPT. The bridge sends canonical
+Codex history to native `gpt-5.6-sol` with High reasoning and no tools, then wraps its text summary
+in the bridge checkpoint format. Codex receives recent real user messages separately from that
+summary, newest first within the retained-message budget, so the current request is not reduced to
+summary prose. The isolated DEV harness still exercises the browser compaction path. Routed v2
+compaction retains its existing task-bound Web handoff path; production setup currently disables v2.
+
+Zero Risk always advertises a fixed three-times compaction interval without enabling
 Bigger Context multipart transport. At that boundary its active ChatGPT response receives the
 checkpoint instruction as an MCP result, returns the compacted context through its bound completion
 control, and ends. The old manual chat is retired; the next compacted Codex request owns a fresh
-Temporary Chat and its locally compiled prompt is copied to the clipboard. A missing Automatic
-retained source falls back to a dedicated read-only Temporary Chat built from canonical Codex
-history; a missing Zero Risk source uses the same explicit manual checkpoint contract. An invalid or
-ambiguous handoff still fails explicitly. Browser-only mode
-uses the same read-only summarization path, then returns the native replacement-history shape expected
-by Codex. A prompt-level checkpoint marker is translated into a visible Codex trace item;
+Temporary Chat and its locally compiled prompt is copied to the clipboard. A missing Zero Risk
+source uses the same explicit manual checkpoint contract. An invalid or ambiguous handoff still
+fails explicitly. A prompt-level checkpoint marker is translated into a visible Codex trace item;
 every later tool action in the same turn continues to present the current turn capability. Visible
 ChatGPT status rows become reasoning summaries, while stable prose between rows becomes native
 Codex commentary.

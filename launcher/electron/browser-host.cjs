@@ -501,6 +501,7 @@ class BrowserHost {
       title: tab.label,
       status: tab.status,
       loading: tab.loading === true,
+      rendererResponsive: tab.rendererResponsive !== false,
       active: this.selectedTabId === tab.id,
       closable: true,
     };
@@ -562,6 +563,7 @@ class BrowserHost {
       initializingSurface: true,
       bootstrapReady: false,
       rendererReady: false,
+      rendererResponsive: true,
       deviceEmulationViewport: null,
       deviceEmulationDirty: true,
       bootstrapDeadlineAt: Date.now() + TURN_TAB_BOOTSTRAP_TIMEOUT_MS,
@@ -642,6 +644,7 @@ class BrowserHost {
       sentAt: null,
       bootstrapReady: false,
       rendererReady: false,
+      rendererResponsive: true,
       lastHeartbeatAt: Date.now(),
     };
     this.turnTabs.set(id, tab);
@@ -791,6 +794,7 @@ class BrowserHost {
       tab.url = contents.getURL();
       tab.loading = false;
       tab.rendererReady = true;
+      tab.rendererResponsive = true;
       if (tab.url.startsWith(CHATGPT_ORIGIN)) tab.bootstrapReady = true;
       this.syncViewVisibility();
       if (browserInteractionModeFor(this) !== "automatic") {
@@ -844,10 +848,14 @@ class BrowserHost {
       this.removeTurnTab(tab, true);
     });
     contents.on("unresponsive", () => {
+      tab.rendererResponsive = false;
       this.logger.warn("browser.tab_unresponsive", { tabId: tab.id, traceId: tab.traceId });
+      this.publishState?.(this.snapshot());
     });
     contents.on("responsive", () => {
+      tab.rendererResponsive = true;
       this.logger.info("browser.tab_responsive", { tabId: tab.id, traceId: tab.traceId });
+      this.publishState?.(this.snapshot());
     });
   }
 
@@ -920,6 +928,7 @@ class BrowserHost {
       tab.url = contents.getURL();
       tab.loading = false;
       tab.rendererReady = true;
+      tab.rendererResponsive = true;
       tab.bootstrapReady = tab.url.startsWith(CHATGPT_ORIGIN);
       this.syncViewVisibility();
       this.publishState?.(this.snapshot());
@@ -954,6 +963,16 @@ class BrowserHost {
       });
       this.signalManualTerminal(tab, "failed");
       this.removeTurnTab(tab, true);
+    });
+    contents.on("unresponsive", () => {
+      tab.rendererResponsive = false;
+      this.logger.warn("browser.manual_tab_unresponsive", { tabId: tab.id, traceId: tab.traceId });
+      this.publishState?.(this.snapshot());
+    });
+    contents.on("responsive", () => {
+      tab.rendererResponsive = true;
+      this.logger.info("browser.manual_tab_responsive", { tabId: tab.id, traceId: tab.traceId });
+      this.publishState?.(this.snapshot());
     });
   }
 
@@ -1243,6 +1262,7 @@ class BrowserHost {
       title: manualInteraction ? "ChatGPT" : this.state.title || "ChatGPT",
       status: this.state.status,
       loading: this.state.loading === true,
+      rendererResponsive: true,
       active: this.selectedTabId === "home",
       closable: false,
     };

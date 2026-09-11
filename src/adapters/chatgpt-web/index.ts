@@ -300,10 +300,18 @@ function submittedTurnFailure(session: ChatGptTurnSession, error: unknown): Erro
   const phase = session.runtime.submission?.phase;
   if (!phase || phase === "prepared") return normalized;
   const ambiguous = phase === "send_activated";
+  const outstanding = session.outstanding();
+  const retiredBinding = normalized.message.includes("retired the turn binding")
+    || (normalized.cause instanceof Error && normalized.cause.message.includes("retired the turn binding"));
+  const acceptedFailure = retiredBinding
+    ? "Codex Native retired the turn binding before its tool work completed. A local tool may have started; inspect its result before retrying."
+    : outstanding.length > 0
+      ? `ChatGPT stopped responding while waiting for Codex tool result${outstanding.length === 1 ? "" : "s"}: ${outstanding.map(request => request.wireName).join(", ")}. A tool may have started; inspect its result before retrying.`
+      : "ChatGPT stopped responding after the task started. Check the ChatGPT tab before continuing.";
   return new ChatGptWebAdapterError(
     ambiguous
       ? "ChatGPT did not confirm that the prompt was sent. Check the ChatGPT tab before continuing."
-      : "ChatGPT stopped responding after the task started. Check the ChatGPT tab before continuing.",
+      : acceptedFailure,
     {
       status: 502,
       errorType: "server_error",

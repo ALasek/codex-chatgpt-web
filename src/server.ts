@@ -662,6 +662,7 @@ export async function compactRequest(
   config: AppConfig,
   adapterFactory: ChatGptWebAdapterFactory = createChatGptWebAdapter,
   options: Pick<ResponseRequestOptions, "onTurnIdentity"> = {},
+  fetchUpstream?: NativeFetch,
 ): Promise<Response> {
   const nativeRequest = req.clone();
   let raw: Record<string, unknown>;
@@ -705,7 +706,7 @@ export async function compactRequest(
   }
   if (!isChatGptWebModelSlug(raw.model)) {
     try {
-      return await forwardNativeCodexRequest(nativeRequest, "responses/compact", undefined, raw);
+      return await forwardNativeCodexRequest(nativeRequest, "responses/compact", fetchUpstream, raw);
     } catch (error) {
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
@@ -728,6 +729,72 @@ export async function compactRequest(
     );
   }
   const input = Array.isArray(raw.input) ? raw.input : [];
+  if (config.purpose !== "dev-harness") {
+    const nativeBody: Record<string, unknown> = {
+      ...raw,
+      model: "gpt-5.6-sol",
+      stream: false,
+      reasoning: { effort: "high" },
+      input: [
+        ...input,
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: COMPACT_PROMPT }],
+        },
+      ],
+    };
+    delete nativeBody.tools;
+    delete nativeBody.tool_choice;
+    delete nativeBody.parallel_tool_calls;
+    delete nativeBody.previous_response_id;
+    const headers = new Headers(req.headers);
+    headers.set("content-type", "application/json");
+    headers.delete("content-encoding");
+    const nativeSummaryRequest = new Request("http://127.0.0.1/v1/responses", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(nativeBody),
+      signal: req.signal,
+    });
+    let response: Response;
+    try {
+      response = await forwardNativeCodexRequest(nativeSummaryRequest, "responses", fetchUpstream, nativeBody);
+    } catch (error) {
+      return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
+    }
+    if (!response.ok) return response;
+    let body: { output?: unknown[]; status?: unknown; error?: unknown };
+    try {
+      body = await response.json() as typeof body;
+    } catch {
+      return formatErrorResponse(502, "invalid_response_error", "Native Sol compaction returned invalid JSON");
+    }
+    if (body.error || (body.status !== undefined && body.status !== "completed")) {
+      return formatErrorResponse(
+        502,
+        "upstream_error",
+        `Native Sol compaction failed (status: ${String(body.status ?? "unknown")})`,
+      );
+    }
+    const summary = (body.output ?? []).flatMap(item => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+      const message = item as { type?: unknown; role?: unknown; phase?: unknown; content?: unknown };
+      if (message.type !== "message" || message.role !== "assistant" || message.phase === "commentary"
+        || !Array.isArray(message.content)) return [];
+      return message.content.flatMap(block => {
+        if (!block || typeof block !== "object" || Array.isArray(block)) return [];
+        const content = block as { type?: unknown; text?: unknown };
+        return (content.type === "output_text" || content.type === "text") && typeof content.text === "string"
+          ? [content.text]
+          : [];
+      });
+    }).join("\n").trim();
+    if (!summary) {
+      return formatErrorResponse(502, "invalid_response_error", "Native Sol compaction produced an empty summary");
+    }
+    return Response.json({ output: buildCompactV1Output(extractCompactUserMessages(input), summary) });
+  }
   const headers = new Headers(req.headers);
   headers.set("content-type", "application/json");
   const internal = new Request("http://127.0.0.1/v1/responses", {
@@ -1017,6 +1084,7 @@ export function startServer(
             config,
             dependencies.adapterFactory,
             { onTurnIdentity: bindIdentity },
+            dependencies.fetchUpstream,
           ),
           req.signal,
           process.platform,

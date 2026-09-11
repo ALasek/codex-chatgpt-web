@@ -3471,6 +3471,7 @@ describe("ChatGPT outer-native harness v4", () => {
       expect(events.at(-1)).toMatchObject({
         type: "error",
         code: "chatgpt_submitted_turn_failed",
+        message: expect.stringContaining("retired the turn binding before its tool work completed"),
       });
     } finally {
       (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = originalRun;

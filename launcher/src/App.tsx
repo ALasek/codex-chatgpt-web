@@ -778,6 +778,7 @@ function BrowserSurface({
     && platform === "darwin"
     && browser?.authenticated !== true;
   const selectedManualTab = browser?.tabs.find(tab => tab.active && tab.interactionMode === "manual");
+  const selectedTab = browser?.tabs.find(tab => tab.active);
   const navigationLocked = browser?.status === "running" || browser?.status === "testing";
   const passkeyWaiting = passkeyAvailable
     && operation?.name === "passkey-login"
@@ -953,6 +954,9 @@ function BrowserSurface({
           onSent={() => void confirmManualSent(selectedManualTab.id)}
           tab={selectedManualTab}
         />
+      ) : null}
+      {selectedTab?.rendererResponsive === false ? (
+        <div className="browser-unresponsive" role="status">{copy.browserUnresponsive}</div>
       ) : null}
       <div className="browser-viewport" ref={browserSlotRef}>
         {!visible ? (

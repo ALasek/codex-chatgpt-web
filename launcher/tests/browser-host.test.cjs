@@ -2189,6 +2189,38 @@ test("a retained conversation is not reused for a different connector identity",
   });
 });
 
+test("turn snapshots publish renderer stalls and recovery", () => {
+  const contents = new EventEmitter();
+  contents.setWindowOpenHandler = () => {};
+  const tab = {
+    id: "tab-renderer-health",
+    traceId: "trace-renderer-health",
+    label: "ChatGPT 1",
+    status: "running",
+    loading: false,
+    rendererResponsive: true,
+    interactionMode: "automatic",
+    view: { webContents: contents },
+  };
+  const snapshots = [];
+  const fixture = Object.assign(Object.create(BrowserHost.prototype), {
+    selectedTabId: tab.id,
+    turnTabs: new Map([[tab.id, tab]]),
+    logger: { info() {}, warn() {}, error() {} },
+    publishState: snapshot => snapshots.push(snapshot),
+    snapshot() {
+      return { tabs: [BrowserHost.prototype.tabSnapshot.call(this, tab)] };
+    },
+  });
+
+  BrowserHost.prototype.bindTurnContents.call(fixture, tab);
+  contents.emit("unresponsive");
+  contents.emit("responsive");
+
+  assert.equal(snapshots[0].tabs[0].rendererResponsive, false);
+  assert.equal(snapshots[1].tabs[0].rendererResponsive, true);
+});
+
 test("an Automatic turn never reuses a retained Zero Risk conversation", async () => {
   const conversationKey = "m".repeat(64);
   const retained = {

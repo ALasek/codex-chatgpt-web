@@ -466,22 +466,21 @@ test("authenticated Interrupt hook endpoint also releases the exact native compa
   const config = { ...defaultConfig("browser-only"), port: 0 };
   const threadId = "thread_interrupt_compact";
   const turnId = "turn_interrupt_compact";
-  let adapterAborted = false;
+  let nativeCompactionAborted = false;
   const server = startServer(config, {
-    adapterFactory: () => ({
-      name: "interrupt-compact-test",
-      runTurn: (_parsed, incoming) => new Promise<void>((_resolve, reject) => {
-        incoming.abortSignal!.addEventListener("abort", () => {
-          adapterAborted = true;
-          reject(incoming.abortSignal!.reason);
+    adapterFactory: () => { throw new Error("production compaction must not start the browser adapter"); },
+    fetchUpstream: request => new Promise<Response>((_resolve, reject) => {
+      request.signal.addEventListener("abort", () => {
+          nativeCompactionAborted = true;
+          reject(request.signal.reason);
         }, { once: true });
-      }),
     }),
   });
   const endpoint = `http://127.0.0.1:${server.port}`;
   const compactResponse = fetch(`${endpoint}/v1/responses/compact`, {
     method: "POST",
     headers: {
+      authorization: "Bearer native-compaction-test",
       "content-type": "application/json",
       "x-codex-turn-metadata": JSON.stringify({ thread_id: threadId, turn_id: turnId }),
     },
@@ -514,7 +513,7 @@ test("authenticated Interrupt hook endpoint also releases the exact native compa
       cancelled_http_turns: 1,
       cancelled_browser_turns: 0,
     });
-    expect(adapterAborted).toBeTrue();
+    expect(nativeCompactionAborted).toBeTrue();
     await compactResponse;
   } finally {
     await server.stop(true);

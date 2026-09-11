@@ -55,9 +55,9 @@ connects ChatGPT back to the tools of that same Codex task until its next compac
   context lifecycle, streaming, tracing, and tool presentation stay intact.
 - **The full Codex harness over MCP.** Full mode gives every effort exposed by the signed-in account,
   including Pro, the active task's filesystem, shell, images, approvals, and configured tools/apps.
-- **Continuous task sessions and native compaction.** Sequential messages reuse one task-bound
-  Temporary Chat. At the context boundary, the retained agent writes the checkpoint before Codex
-  starts a clean chat; if that chat was closed, canonical Codex history supplies the fallback.
+- **Continuous task sessions and native pre-compaction.** Sequential messages reuse one task-bound
+  Temporary Chat. Before an oversized task switches into Web, native GPT-5.6 Sol at High writes a
+  checkpoint; the bridge retains recent real user messages separately and starts a clean Web chat.
 - **One cross-platform launcher.** The macOS, Windows, and Linux app owns sign-in, model setup, MCP
   guidance, health checks, safe diagnostics, and up to five visible task-bound browser tabs.
 - **Fail-closed behavior.** Missing models, tools, or changed ChatGPT UI produce explicit errors
@@ -147,9 +147,8 @@ The launcher's **MCP** page guides the complete setup. For the exact clicks, see
 >
 > See [Limits](https://github.com/miuuyy/codex-chatgpt-web/discussions/309) for the current
 > ChatGPT message allowances for **GPT-5.6 Sol Pro** and **GPT-6 Astra**. Context limits depend on
-> the account type and selected effort. Plus Medium/High uses a measured 90,000-token window, or
-> up to 270,000 tokens with experimental **3× context** enabled, with native Codex compaction
-> supported throughout.
+> the account type and selected effort. Plus Medium/High advertises a measured 90,000-token window
+> and now pre-compacts at 60,000 tokens, or 180,000 tokens with experimental **3× context** enabled.
 
 1. Finish the required setup, open **MCP**, create the Tunnel and regular API key, then press
    **Connect harness**.

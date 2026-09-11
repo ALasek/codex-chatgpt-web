@@ -875,6 +875,15 @@ code {
   background: #ffffff;
 }
 
+.browser-unresponsive {
+  padding: 8px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-warning) 35%, transparent);
+  background: color-mix(in srgb, var(--color-text-warning) 12%, var(--color-bg-primary));
+  color: var(--color-text-warning);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
 .browser-underlay {
   position: absolute;
   inset: 0;

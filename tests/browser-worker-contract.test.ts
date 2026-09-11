@@ -3039,7 +3039,7 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
   )).toThrow("two-part ceiling");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     269_999,
-    80_000,
+    60_000,
     "gpt-5.6-sol",
     "high",
     plus,
@@ -3048,7 +3048,7 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
   )).not.toThrow();
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     270_000,
-    80_000,
+    60_000,
     "gpt-5.6-sol",
     "high",
     plus,
@@ -3057,7 +3057,7 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
   )).toThrow("270,000-token three-part ceiling");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     180_000,
-    80_000,
+    60_000,
     "gpt-5.6-sol",
     "high",
     plus,
@@ -3089,7 +3089,7 @@ test("Bigger Context stages use the lowest account mode that can carry the stage
   const pro = { localToolsEnabled: false, solAvailable: true, proAvailable: true };
   expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 30_000, 200_000).effort).toBe("low");
   expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 30_000, 300_000).effort).toBe("medium");
-  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 80_000, 300_000).effort).toBe("medium");
+  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 60_000, 300_000).effort).toBe("medium");
   // The same text must have the same available input budget inline, staged or in the final part.
   // 80k is the early compaction trigger; the remaining input budget includes an 8192-token reserve.
   expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, 80_169, 276_680).effort).toBe("medium");

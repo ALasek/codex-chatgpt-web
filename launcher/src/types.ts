@@ -53,6 +53,7 @@ export interface BrowserTabState {
   title: string;
   status: "idle" | "loading" | "signed-out" | "ready" | "testing" | "running" | "error" | "aborted";
   loading: boolean;
+  rendererResponsive: boolean;
   active: boolean;
   closable: boolean;
   interactionMode?: BrowserInteractionMode;

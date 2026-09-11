@@ -636,7 +636,7 @@ export class DevChatDriver {
         instructions: DEV_CHAT_SYSTEM_INSTRUCTIONS,
         store: false,
       }),
-    }), this.config, this.adapterFactory);
+    }), { ...this.config, purpose: "dev-harness" }, this.adapterFactory);
     if (!response.ok) {
       let message = `DEV compaction failed with HTTP ${response.status}`;
       try {

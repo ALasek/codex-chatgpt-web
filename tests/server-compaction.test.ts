@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ProviderAdapter } from "../src/adapters/base";
-import { defaultConfig } from "../src/config";
+import { defaultConfig as baseDefaultConfig } from "../src/config";
 import { COMPACT_PROMPT, SUMMARY_PREFIX, decodeCompactionSummary, encodeCompactionSummary } from "../src/responses/compaction";
 import { compactRequest, responseRequest as respond } from "../src/server";
 import type { CodexProviderConfig } from "../src/types";
@@ -9,6 +9,10 @@ import { chatGptCompactionSourceExecutionKey, chatGptTurnExecutionKey } from "..
 
 const model = "chatgpt-web/high";
 const summary = "The repository was inspected. Continue by implementing the bounded Web context contract.";
+
+function defaultConfig(mode: "browser-only" | "full" = "browser-only") {
+  return { ...baseDefaultConfig(mode), purpose: "dev-harness" as const };
+}
 
 // These fixtures test checkpoint authorization, not persisted previous_response_id storage.
 const responseRequest: typeof respond = (request, config, factory, options) =>
@@ -45,6 +49,69 @@ function compactionAdapterFactory(
     };
   };
 }
+
+test("precompacts a production Web handoff with native Sol high and retains the latest request", async () => {
+  let adapterStarted = false;
+  let upstreamBody: Record<string, unknown> | undefined;
+  const response = await compactRequest(new Request("http://127.0.0.1:17841/v1/responses/compact", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test-native-token",
+      "content-type": "application/json",
+      "content-encoding": "identity",
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      tools: [{ type: "function", name: "exec_command" }],
+      tool_choice: "auto",
+      parallel_tool_calls: true,
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Earlier request" }] },
+        { type: "message", role: "assistant", content: [{ type: "output_text", text: "Earlier answer" }] },
+        { type: "message", role: "user", content: [{ type: "input_text", text: "Actual latest request" }] },
+      ],
+    }),
+  }), baseDefaultConfig("full"), () => {
+    adapterStarted = true;
+    throw new Error("browser adapter must not start for production Web compaction");
+  }, {}, async request => {
+    expect(request.url).toBe("https://chatgpt.com/backend-api/codex/responses");
+    expect(request.headers.get("authorization")).toBe("Bearer test-native-token");
+    expect(request.headers.get("content-encoding")).toBeNull();
+    upstreamBody = await request.json() as Record<string, unknown>;
+    return Response.json({
+      status: "completed",
+      output: [{
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: summary }],
+      }],
+    });
+  });
+
+  expect(response.status).toBe(200);
+  expect(adapterStarted).toBeFalse();
+  expect(upstreamBody).toMatchObject({
+    model: "gpt-5.6-sol",
+    stream: false,
+    reasoning: { effort: "high" },
+  });
+  expect(upstreamBody).not.toHaveProperty("tools");
+  expect(upstreamBody).not.toHaveProperty("tool_choice");
+  expect(upstreamBody).not.toHaveProperty("parallel_tool_calls");
+  expect((upstreamBody!.input as unknown[]).at(-1)).toMatchObject({
+    role: "user",
+    content: [{ type: "input_text", text: COMPACT_PROMPT }],
+  });
+  const body = await response.json() as { output: Array<{ content: Array<{ text: string }> }> };
+  expect(body.output.map(item => item.content[0]!.text)).toEqual([
+    "Earlier request",
+    "Actual latest request",
+    `${SUMMARY_PREFIX}\n${summary}`,
+  ]);
+});
 
 test("compacts ChatGPT Web v1 through a dedicated read-only browser summarization turn", async () => {
   const providers: CodexProviderConfig[] = [];
