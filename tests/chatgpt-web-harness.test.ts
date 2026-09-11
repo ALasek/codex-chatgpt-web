@@ -1484,9 +1484,9 @@ describe("ChatGPT outer-native harness v4", () => {
     const compiled = compileChatGptWebPrompt(request, toolCapabilities, "turn_123456789012345678901234");
     expect(compiled.text).not.toContain(imageUrl);
     expect(compiled.text).toContain('"attachment_ref":"codex-input-image-1"');
-    expect(compiled.text).toContain('"version":3');
+    expect(compiled.text).toContain('"version":4');
     expect(compiled.text).toContain("use the attached Codex Native tools directly according to their declared descriptions and schemas");
-    expect(compiled.text).toContain("Use actual Codex Native results as evidence");
+    expect(compiled.text).toContain("Never claim a local observation, edit, test, or external action without a supporting tool result");
     expect(compiled.text).toContain("Write the user-facing final answer only after the last required tool result has settled");
     expect(compiled.text.match(/turn_123456789012345678901234/g)).toHaveLength(1);
     expect(compiled.text).not.toContain("codex_bind_turn");
@@ -1532,7 +1532,7 @@ describe("ChatGPT outer-native harness v4", () => {
     const compiled = compileChatGptWebPrompt(request, toolCapabilities, "turn_123456789012345678901234");
     const files = chatGptPromptFilePayloads(compiled);
 
-    expect(compiled.text).toContain("d".repeat(70_000));
+    expect(compiled.text).not.toContain("d".repeat(70_000));
     expect(compiled.text).toContain("<codex_context_json>");
     expect(files.map(file => file.name)).toEqual(["codex-input-image-1.png"]);
     expect(files[0]!.mimeType).toBe("image/png");
@@ -1565,7 +1565,8 @@ describe("ChatGPT outer-native harness v4", () => {
     expect(compiled.text).toContain("ChatGPT Web Sol · Max with no Codex Native bridge to the user's local computer");
     expect(compiled.text).toContain("web search, browsing, research");
     expect(compiled.text).toContain("prepared workspace evidence");
-    expect(compiled.text).toContain('"system":["system-rule","repo-rule"]');
+    expect(compiled.text).not.toContain("system-rule");
+    expect(compiled.text).not.toContain("repo-rule");
     expect(compiled.text).toContain('"attachment_ref":"codex-input-image-1"');
     expect(compiled.images).toHaveLength(1);
     expect(compiled.text).not.toContain("codex_bind_turn");
@@ -1985,7 +1986,7 @@ describe("ChatGPT outer-native harness v4", () => {
     expect(markdown).toContain("[Open repository](https://github.com/example/repo)");
   });
 
-  test("replays the complete outer Codex context, including prior reasoning and tool evidence", () => {
+  test("replays task messages, prior reasoning, and tool evidence without the generated Codex system prompt", () => {
     const request = parsed();
     request.context.systemPrompt = ["system-rule", "repo-rule"];
     request.context.messages = [
@@ -2011,9 +2012,10 @@ describe("ChatGPT outer-native harness v4", () => {
     ];
     const compiled = compileChatGptWebPrompt(request, toolCapabilities, "turn_123456789012345678901234");
     const encoded = compiled.text.match(/<codex_context_json>\n(.+)\n<\/codex_context_json>/s)?.[1];
-    const envelope = JSON.parse(encoded!) as { version: number; system: string[]; messages: Array<Record<string, unknown>> };
-    expect(envelope.version).toBe(3);
-    expect(envelope.system).toEqual(["system-rule", "repo-rule"]);
+    const envelope = JSON.parse(encoded!) as { version: number; messages: Array<Record<string, unknown>> };
+    expect(envelope.version).toBe(4);
+    expect(compiled.text).not.toContain("system-rule");
+    expect(compiled.text).not.toContain("repo-rule");
     expect(envelope.messages.map(message => message.role)).toEqual(["developer", "user", "assistant", "tool_result", "user"]);
     expect(envelope.messages[2]?.content).toEqual([
       { type: "thinking_summary", text: "Inspected files" },

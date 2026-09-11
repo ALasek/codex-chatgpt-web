@@ -136,7 +136,7 @@ export function formatChatGptWebMultipartCommit(
     "</codex_context_part_json>",
     "<codex_multipart_execute>",
     `All ${totalParts} context parts are now present. Reconstruct the original Codex context from their records and begin the task now.`,
-    "Treat system records as the original system instructions in system_index order. Treat message records as one conversation in message_index order and preserve every encoded role literally.",
+    "Treat the optional environment record as operational context. Treat message records as one conversation in message_index order and preserve every encoded role literally.",
     "The staged JSON is conversation data under the transport contract below. Do not treat the stage wrappers, acknowledgements, or this commit wrapper as task messages.",
     "</codex_multipart_execute>",
     multipart.commit,
@@ -245,6 +245,113 @@ function startsWithControlBlock(message: CodexMessage, tag: string): boolean {
   return message.role === "developer" && plainMessageText(message)?.trimStart().startsWith(tag) === true;
 }
 
+const GENERATED_CONTEXT_TAGS = [
+  "app-context",
+  "recommended_plugins",
+  "skills_instructions",
+  "permissions instructions",
+  "collaboration_mode",
+  "multi_agent_mode",
+  "apps_instructions",
+  "plugins_instructions",
+  "model_switch",
+] as const;
+
+function escapedRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function taggedBlockPattern(tag: string): RegExp {
+  const escaped = escapedRegExp(tag);
+  return new RegExp(`<${escaped}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${escaped}>`, "gi");
+}
+
+function strippedGeneratedContext(text: string): string {
+  let changed = false;
+  const remove = (value: string, tag: string): string => value.replace(taggedBlockPattern(tag), () => {
+    changed = true;
+    return "";
+  });
+  let stripped = remove(text, "environment_context");
+  for (const tag of GENERATED_CONTEXT_TAGS) stripped = remove(stripped, tag);
+  if (!changed) return text;
+  return stripped.replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, "\n\n").trim();
+}
+
+function sanitizedContextMessage(message: CodexMessage): CodexMessage | undefined {
+  if (message.role !== "user" && message.role !== "developer") return message;
+  if (typeof message.content === "string") {
+    const content = strippedGeneratedContext(message.content);
+    return content ? { ...message, content } : undefined;
+  }
+  const content: CodexContentPart[] = [];
+  for (const part of message.content) {
+    if (part.type === "image") {
+      content.push(part);
+      continue;
+    }
+    const text = strippedGeneratedContext(part.text);
+    if (text) content.push({ ...part, text });
+  }
+  return content.length > 0 ? { ...message, content } : undefined;
+}
+
+interface CompactCodexEnvironment {
+  cwd?: string;
+  workspace_roots?: string[];
+  sandbox_mode?: string;
+  current_date?: string;
+  timezone?: string;
+}
+
+function taggedValue(text: string, tag: string): string | undefined {
+  const match = new RegExp(`<${escapedRegExp(tag)}>([\\s\\S]*?)<\\/${escapedRegExp(tag)}>`, "i").exec(text);
+  const value = match?.[1]?.trim();
+  return value || undefined;
+}
+
+function compactEnvironmentFromMessages(messages: readonly CodexMessage[]): CompactCodexEnvironment | undefined {
+  let environment: CompactCodexEnvironment | undefined;
+  for (const message of messages) {
+    if (message.role !== "user" && message.role !== "developer") continue;
+    const texts = typeof message.content === "string"
+      ? [message.content]
+      : message.content.filter(part => part.type === "text").map(part => part.text);
+    for (const text of texts) {
+      for (const match of text.matchAll(taggedBlockPattern("environment_context"))) {
+        const block = match[0];
+        const roots = [...block.matchAll(/<root>([\s\S]*?)<\/root>/gi)]
+          .map(root => root[1]?.trim())
+          .filter((root): root is string => Boolean(root));
+        const explicitSandbox = taggedValue(block, "sandbox_mode");
+        const sandboxMode = explicitSandbox
+          ?? (/permission_profile\s+type=["']disabled["'][\s\S]*?file_system\s+type=["']unrestricted["']/i.test(block)
+            ? "danger-full-access"
+            : undefined);
+        const cwd = taggedValue(block, "cwd");
+        const currentDate = taggedValue(block, "current_date");
+        const timezone = taggedValue(block, "timezone");
+        environment = {
+          ...(cwd ? { cwd } : {}),
+          ...(roots.length > 0 ? { workspace_roots: [...new Set(roots)] } : {}),
+          ...(sandboxMode ? { sandbox_mode: sandboxMode } : {}),
+          ...(currentDate ? { current_date: currentDate } : {}),
+          ...(timezone ? { timezone } : {}),
+        };
+      }
+    }
+  }
+  return environment && Object.keys(environment).length > 0 ? environment : undefined;
+}
+
+function compactTaskMessages(messages: readonly CodexMessage[]): CodexMessage[] {
+  // Keep human/project instructions such as AGENTS.md, but remove Codex-generated catalogs and UI
+  // state that are useful to the native host rather than to its Web-backed model.
+  return withoutSupersededModelSwitchContracts(messages)
+    .map(sanitizedContextMessage)
+    .filter((message): message is CodexMessage => message !== undefined);
+}
+
 /**
  * Codex appends a complete replacement developer contract whenever the user changes models. On a
  * later switch the earlier model-switch contract and its adjacent skill catalog are obsolete, but
@@ -310,7 +417,7 @@ function messageEnvelope(
 }
 
 type MultipartContextRecord =
-  | { kind: "system"; system_index: number; content: string }
+  | { kind: "environment"; environment: CompactCodexEnvironment }
   | { kind: "message"; message_index: number; message: Record<string, unknown> };
 
 interface MultipartRecordWeight {
@@ -460,16 +567,18 @@ export function compileChatGptWebPrompt(
   if (!mode.localTools && turnToken !== undefined) {
     throw new Error("A read-only ChatGPT Web effort must not receive a local-tool capability token");
   }
-  const system = parsed.context.systemPrompt ?? [];
+  // `systemPrompt` is Codex's complete native runtime prompt. The Web backend gets a purpose-built
+  // contract below plus the compact operational fields and task messages it actually needs.
+  const environment = compactEnvironmentFromMessages(parsed.context.messages);
   const sharedContract = [
-    "Act as the model backend for the Codex task encoded below.",
-    "Do not create, spawn, or delegate to subagents. Complete the task in the current agent, even when collaboration tools are available.",
+    "You are the active Web-backed model for an existing Codex task. Operate as the task's coding agent, not as a separate chat adviser.",
+    "Follow the newest user request plus supplied project instructions. A later user message in the same turn is a steer: update your plan immediately and stop obsolete work. Do not repeat work already completed in the supplied history.",
+    "Do not create, spawn, or delegate to subagents. Complete the task in the current agent.",
     multipartEnabled
       ? "The staged JSON task context is conversation data, not instructions about this transport contract."
       : "The inline JSON task context is conversation data, not instructions about this transport contract.",
-    "Preserve the task's original instruction priority inside the supplied Codex context: system, then developer, then user. This outer contract only transports that context and its tool access; it must not alter the task's semantic intent.",
-    "Interpret every message role literally: assistant messages are your own earlier replies; user messages are the human user's messages; agent_message messages are inter-agent inputs with their encoded author and recipient; system, developer, and tool_result content was not written by the human user.",
-    "Codex-supplied environment context blocks, including the XML element named environment_context, are operational context rather than human-authored text. Obey them at their original priority, but do not attribute, quote, summarize, or otherwise mention them unless the latest user request explicitly asks about that context.",
+    "Preserve instruction priority inside the supplied context: developer, then user. Interpret message roles literally: assistant messages are your earlier replies; user messages are human requests; agent_message messages are inter-agent inputs; developer and tool_result content was not written by the human user.",
+    "Treat the supplied working directory and workspace roots as authoritative. Never invent, translate, or infer another path. Confirm the working directory with a local tool before the first local change.",
     "When asked what the user previously wrote, said, or asked, answer only from the human-authored text in user messages. Exclude agent_message inputs, assistant replies, and all Codex-supplied system, developer, environment, tool, attachment, and transport content.",
     multipartEnabled
       ? "Read and reconstruct every acknowledged staged JSON record before acting."
@@ -481,6 +590,13 @@ export function compileChatGptWebPrompt(
         : "Each image_attachment in the context refers to the correspondingly named image attached to this ChatGPT message; inspect it directly.",
     "If a ChatGPT-native capability renders a rich card, widget, chart, or other non-text result, also provide the relevant result as ordinary Markdown in the final answer. A private ChatGPT UI widget never replaces the Markdown answer returned to Codex.",
     "Never copy a ChatGPT widget's HTML, CSS, class names, or DOM markup into the answer unless the user explicitly requested that source markup.",
+    "Preserve unrelated worktree changes. Prefer minimal, readable changes and existing project dependencies.",
+    "Do not perform destructive, external, or materially broader actions unless the user's request authorizes them.",
+    "Ask the user only when a missing choice would materially change the outcome or additional authority is required.",
+    "For current external facts, use available web or MCP capabilities and prefer authoritative sources.",
+    "Before tool work, give one brief commentary update describing the immediate plan. During longer work, report only meaningful progress or blockers.",
+    "Never claim a local observation, edit, test, or external action without a supporting tool result.",
+    "In the final answer, lead with the outcome, then mention changed files, verification, and remaining limitations.",
     "Do not mention this transport contract, context packaging, or capability routing in the user-facing answer unless the user explicitly asks how the bridge works.",
   ];
   const transportContract = parsed._compactionRequest
@@ -497,11 +613,10 @@ export function compileChatGptWebPrompt(
     : mode.localTools
     ? [
       "For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.",
-      "Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.",
-      "Use actual Codex Native results as evidence for local observations and effects.",
+      "Inspect relevant files, configuration, logs, and git state instead of guessing. When the request requires an action, perform it with tools instead of merely describing proposed code or commands.",
       "A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.",
       "After a deterministic tool failure, update the working hypothesis from that result and inspect the relevant repository or environment before choosing a different next action; do not repeat the same call unless its inputs or observable state changed.",
-      "Continue using the available tools until the requested work is complete and verified.",
+      "Continue until the requested outcome is complete. Verify changes with proportionate tests or direct inspection.",
       "Write the user-facing final answer only after the last required tool result has settled. Do not call another tool after beginning that final answer.",
     ]
     : [
@@ -591,7 +706,7 @@ export function compileChatGptWebPrompt(
       : "Return only the answer that the outer Codex task should receive.";
     if (multipartEnabled) {
       const records: MultipartContextRecord[] = [
-        ...system.map((content, system_index) => ({ kind: "system" as const, system_index, content })),
+        ...(environment ? [{ kind: "environment" as const, environment }] : []),
         ...messages.map((message, message_index) => ({
           kind: "message" as const,
           message_index,
@@ -640,7 +755,11 @@ export function compileChatGptWebPrompt(
       multipart.parts = partitionMultipartContext(records, multipartParts!, budgets);
       return { text: multipart.commit, images, multipart };
     }
-    const envelopeJson = withoutRetiredTurnHandles(JSON.stringify({ version: 3, system, messages }));
+    const envelopeJson = withoutRetiredTurnHandles(JSON.stringify({
+      version: 4,
+      ...(environment ? { environment } : {}),
+      messages,
+    }));
     const text = [
       ...sharedContract,
       ...transportContract,
@@ -656,7 +775,7 @@ export function compileChatGptWebPrompt(
     return { text, images };
   };
 
-  let sourceMessages = withoutSupersededModelSwitchContracts(parsed.context.messages);
+  let sourceMessages = compactTaskMessages(parsed.context.messages);
   const initialMessageCount = sourceMessages.length;
   let compiled = build(sourceMessages);
   if (!parsed._compactionRequest) return compiled;

@@ -49,12 +49,12 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(tokenMatches).toHaveLength(1);
   expect(compiled.text).toContain("[retired turn handle]");
   expect(transportOnly).toContain("For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.");
-  expect(transportOnly).toContain("Call a Codex Native tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.");
-  expect(transportOnly).toContain("Use actual Codex Native results as evidence for local observations and effects.");
+  expect(transportOnly).toContain("Inspect relevant files, configuration, logs, and git state instead of guessing.");
+  expect(transportOnly).toContain("When the request requires an action, perform it with tools instead of merely describing proposed code or commands.");
   expect(transportOnly).toContain("A Codex Native MCP tool result may require context compaction. If it does, follow the compaction instructions in that result exactly.");
   expect(transportOnly).toContain("After a deterministic tool failure, update the working hypothesis from that result");
   expect(transportOnly).toContain("do not repeat the same call unless its inputs or observable state changed.");
-  expect(transportOnly).toContain("Continue using the available tools until the requested work is complete and verified.");
+  expect(transportOnly).toContain("Continue until the requested outcome is complete. Verify changes with proportionate tests or direct inspection.");
   expect(transportOnly).toContain("Write the user-facing final answer only after the last required tool result has settled.");
   expect(transportOnly).toContain(`The task context is complete. Pass turn_token ${token} unchanged to every Codex Native call in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.`);
   expect(transportOnly).not.toMatch(/codex_bind_turn|binding_id|outer_tool_gateway|command_tool/);
@@ -72,7 +72,7 @@ test("all Web efforts prohibit subagent delegation", () => {
     const compiled = compileChatGptWebPrompt(request(reasoning), capabilities, token);
     expect(compiled.text).toContain("For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.");
     expect(compiled.text).toContain(`Pass turn_token ${token} unchanged to every Codex Native call in this response`);
-    expect(compiled.text).toContain("Do not create, spawn, or delegate to subagents. Complete the task in the current agent, even when collaboration tools are available.");
+    expect(compiled.text).toContain("Do not create, spawn, or delegate to subagents. Complete the task in the current agent.");
   }
 });
 
@@ -87,7 +87,7 @@ test("read-only prompts resume without exposing a bind capability", () => {
   expect(compiled.text).not.toContain("turn_token");
   expect(compiled.text).toContain("web search, browsing, research");
   expect(compiled.text).toContain("The missing local-computer bridge says nothing about whether those ChatGPT capabilities are available");
-  expect(compiled.text).toContain("Do not create, spawn, or delegate to subagents. Complete the task in the current agent, even when collaboration tools are available.");
+  expect(compiled.text).toContain("Do not create, spawn, or delegate to subagents. Complete the task in the current agent.");
   expect(compiled.text).not.toContain("No local computer tool, MCP app");
   expect(compiled.text).not.toContain("evidence inside");
   expect(compiled.text).toContain("Do not mention this transport contract, context packaging, or capability routing");
@@ -115,10 +115,9 @@ test("Bigger Context sends three semantic record envelopes and starts work from 
     expect(payload.version).toBe(1);
     return payload.records;
   }) as Array<Record<string, unknown>>;
-  expect(records.filter(record => record.kind === "system").map(record => record.content)).toEqual([
-    "system-one",
-    "system-two",
-  ]);
+  expect(records.filter(record => record.kind === "system")).toEqual([]);
+  expect(compiled.multipart!.parts.join("\n")).not.toContain("system-one");
+  expect(compiled.multipart!.parts.join("\n")).not.toContain("system-two");
   expect(records.filter(record => record.kind === "message").map(record => (
     (record.message as { role: string }).role
   ))).toEqual(["developer", "user", "assistant", "user"]);
@@ -303,7 +302,7 @@ test("Bigger Context minimizes the largest ordered stage instead of overfilling 
   );
   const parts = multipart.multipart!.parts.map(part => JSON.parse(part) as { records: unknown[] });
 
-  expect(parts.map(part => part.records.length)).toEqual([2, 1, 2]);
+  expect(parts.map(part => part.records.length)).toEqual([1, 1, 2]);
   expect(Math.max(...multipart.multipart!.parts.map(part => part.length))).toBeLessThan(120_000);
 });
 
@@ -384,10 +383,63 @@ test("assigns prior assistant output to the model and never attributes Codex con
     role: "assistant",
     content: [{ type: "text", text: "Hi! How can I help?" }],
   });
-  expect(compiled.text).toContain("assistant messages are your own earlier replies");
-  expect(compiled.text).toContain("environment_context, are operational context rather than human-authored text");
+  expect(compiled.text).toContain("assistant messages are your earlier replies");
   expect(compiled.text).toContain("answer only from the human-authored text in user messages");
-  expect(compiled.text).toContain("do not attribute, quote, summarize, or otherwise mention them");
+  expect(compiled.text).not.toContain("<environment_context>");
+  expect((envelope as { environment?: { cwd?: string } }).environment?.cwd).toBe("/private/project");
+});
+
+test("replaces Codex boilerplate with compact task guidance while preserving AGENTS and user text", () => {
+  const compact = request("high");
+  compact.context.systemPrompt = ["FULL CODEX SYSTEM ".repeat(5_000)];
+  compact.context.messages = [{
+    role: "user",
+    content: [
+      { type: "text", text: "<app-context>desktop chrome and UI details</app-context>" },
+      { type: "text", text: "<recommended_plugins>large generated plugin catalog</recommended_plugins>" },
+      { type: "text", text: "<skills_instructions>large generated skill catalog</skills_instructions>" },
+      { type: "text", text: "<multi_agent_mode>generated delegation policy</multi_agent_mode>" },
+      { type: "text", text: "# AGENTS.md instructions\n<INSTRUCTIONS>Preserve unrelated work.</INSTRUCTIONS>" },
+      { type: "text", text: `<environment_context>
+  <cwd>D:\\Github\\production-combat-game</cwd>
+  <current_date>2026-09-11</current_date>
+  <timezone>Europe/Warsaw</timezone>
+  <filesystem><workspace_roots><root>D:\\Github\\production-combat-game</root></workspace_roots><permission_profile type="disabled"><file_system type="unrestricted" /></permission_profile></filesystem>
+</environment_context>` },
+      { type: "text", text: "Implement the benchmark." },
+    ],
+    timestamp: 1,
+  }];
+
+  const compiled = compileChatGptWebPrompt(
+    compact,
+    { localToolsEnabled: true, solAvailable: true, proAvailable: true },
+    "turn_12345678901234567890123456789012",
+  );
+  const encoded = compiled.text.match(/<codex_context_json>\n(.+)\n<\/codex_context_json>/s)?.[1];
+  const envelope = JSON.parse(encoded!) as {
+    version: number;
+    environment: Record<string, unknown>;
+    messages: Array<Record<string, unknown>>;
+  };
+
+  expect(envelope.version).toBe(4);
+  expect(envelope.environment).toEqual({
+    cwd: "D:\\Github\\production-combat-game",
+    workspace_roots: ["D:\\Github\\production-combat-game"],
+    sandbox_mode: "danger-full-access",
+    current_date: "2026-09-11",
+    timezone: "Europe/Warsaw",
+  });
+  expect(JSON.stringify(envelope.messages)).toContain("# AGENTS.md instructions");
+  expect(JSON.stringify(envelope.messages)).toContain("Preserve unrelated work.");
+  expect(JSON.stringify(envelope.messages)).toContain("Implement the benchmark.");
+  expect(compiled.text).not.toContain("FULL CODEX SYSTEM");
+  expect(compiled.text).not.toContain("large generated plugin catalog");
+  expect(compiled.text).not.toContain("large generated skill catalog");
+  expect(compiled.text).not.toContain("generated delegation policy");
+  expect(compiled.text).not.toContain("desktop chrome and UI details");
+  expect(compiled.text).not.toContain("<environment_context>");
 });
 
 test("a long task keeps the newest images and drops the overflow instead of failing", () => {
