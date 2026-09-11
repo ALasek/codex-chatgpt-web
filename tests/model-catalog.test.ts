@@ -91,8 +91,22 @@ describe("native /models augmentation", () => {
     config.experimentalBiggerContext = true;
     const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
     const web = models.find(model => model.slug === CHATGPT_WEB_DEFAULT_MODEL_SLUG)!;
-    expect(web.context_window).toBe(333_579);
-    expect(web.auto_compact_token_limit).toBe(285_000);
+    expect(web.context_window).toBe(270_000);
+    expect(web.auto_compact_token_limit).toBe(180_000);
+  });
+
+  test("publishes the 60k compaction cap for launcher-selected Sol Extra high", () => {
+    const config = defaultConfig("full");
+    config.proAvailable = true;
+    config.webDefaultEffort = "xhigh";
+    const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
+    const web = models.find(model => model.slug === CHATGPT_WEB_DEFAULT_MODEL_SLUG)!;
+
+    expect(web).toMatchObject({
+      context_window: 90_000,
+      effective_context_window_percent: 67,
+      auto_compact_token_limit: 60_000,
+    });
   });
 
   test("keeps native Sol selectable in the bounded Compatibility V1 registry", () => {

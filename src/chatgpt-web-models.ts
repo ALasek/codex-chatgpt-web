@@ -146,19 +146,21 @@ export function resolveChatGptWebContextLimits(
   }
 
   let limits: ChatGptWebContextLimits;
-  if (capabilities.proAvailable) {
-    const contextWindow = effort === "low"
-      ? CHATGPT_WEB_PRO_STANDARD_CONTEXT_WINDOW
-      : effort === "max"
-        ? CHATGPT_WEB_PRO_MODEL_CONTEXT_WINDOW
-        : CHATGPT_WEB_PRO_STANDARD_CONTEXT_WINDOW;
-    limits = contextLimits(contextWindow, CHATGPT_WEB_PRO_AUTO_COMPACT_TOKEN_LIMIT);
+  if (effort === "max" && capabilities.proAvailable) {
+    limits = contextLimits(
+      CHATGPT_WEB_PRO_MODEL_CONTEXT_WINDOW,
+      CHATGPT_WEB_PRO_AUTO_COMPACT_TOKEN_LIMIT,
+    );
   } else if (effort === "low") {
     limits = contextLimits(
       CHATGPT_WEB_INSTANT_CONTEXT_WINDOW,
       CHATGPT_WEB_INSTANT_AUTO_COMPACT_TOKEN_LIMIT,
     );
-  } else if (effort === "medium" || effort === "high") {
+  } else if (
+    effort === "medium"
+    || effort === "high"
+    || (effort === "xhigh" && capabilities.proAvailable)
+  ) {
     limits = contextLimits(
       CHATGPT_WEB_MEDIUM_HIGH_CONTEXT_WINDOW,
       CHATGPT_WEB_MEDIUM_HIGH_AUTO_COMPACT_TOKEN_LIMIT,

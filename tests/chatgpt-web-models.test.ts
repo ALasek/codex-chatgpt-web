@@ -164,17 +164,17 @@ describe("ChatGPT Web model routes", () => {
       .toThrow("unavailable effort");
   });
 
-  test("publishes the usable Pro browser window instead of the unreachable underlying model window", () => {
+  test("uses ordinary Sol limits for reasoning modes on Pro accounts and reserves the Pro window for Pro mode", () => {
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "low", pro)).toEqual({
-      contextWindow: 111_193,
-      effectiveContextWindowPercent: 85,
-      autoCompactTokenLimit: 95_000,
+      contextWindow: 41_000,
+      effectiveContextWindowPercent: 78,
+      autoCompactTokenLimit: 32_000,
     });
     for (const effort of ["medium", "high", "xhigh"] as const) {
       expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, effort, pro)).toEqual({
-        contextWindow: 111_193,
-        effectiveContextWindowPercent: 85,
-        autoCompactTokenLimit: 95_000,
+        contextWindow: 90_000,
+        effectiveContextWindowPercent: 67,
+        autoCompactTokenLimit: 60_000,
       });
     }
     expect(resolveChatGptWebContextLimits(CHATGPT_WEB_BACKEND_MODEL, "max", pro)).toEqual({
