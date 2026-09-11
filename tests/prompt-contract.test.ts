@@ -88,6 +88,7 @@ test("read-only prompts resume without exposing a bind capability", () => {
   expect(compiled.text).toContain("web search, browsing, research");
   expect(compiled.text).toContain("The missing local-computer bridge says nothing about whether those ChatGPT capabilities are available");
   expect(compiled.text).toContain("Do not create, spawn, or delegate to subagents. Complete the task in the current agent.");
+  expect(compiled.text).toContain("Prefer Blender MCP background or CLI tools when a .blend path is available");
   expect(compiled.text).not.toContain("No local computer tool, MCP app");
   expect(compiled.text).not.toContain("evidence inside");
   expect(compiled.text).toContain("Do not mention this transport contract, context packaging, or capability routing");
