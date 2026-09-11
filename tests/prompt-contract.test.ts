@@ -537,13 +537,13 @@ test("requires ChatGPT-native rich results to include a safe Markdown answer for
   expect(compiled.text).toContain("Never copy a ChatGPT widget's HTML, CSS, class names, or DOM markup");
 });
 
-test("uses the public Instant name without leaking the browser menu alias into the prompt", () => {
+test("uses the explicit Sol label without leaking an internal browser alias into the prompt", () => {
   const compiled = compileChatGptWebPrompt(
     request("low"),
     { localToolsEnabled: false, solAvailable: true, proAvailable: true },
   );
 
-  expect(compiled.text).toContain("This is ChatGPT Web Instant with no Codex Native bridge to the user's local computer");
+  expect(compiled.text).toContain("This is ChatGPT Web Sol · Low with no Codex Native bridge to the user's local computer");
   expect(compiled.text).not.toContain("Instant 5.5");
 });
 

@@ -299,6 +299,9 @@ export interface CodexProviderConfig {
     solAvailable?: boolean;
     /** Account capability proven by the authenticated browser probe. */
     proAvailable?: boolean;
+    /** Launcher defaults captured and pinned when a task first uses the Web route. */
+    webDefaultModel?: "gpt-5.6-sol" | "gpt-6-astra";
+    webDefaultEffort?: "low" | "medium" | "high" | "xhigh" | "max";
     /** Authorize per-call "Allow once" confirmation clicks for this connector. */
     autoApproveToolCalls?: boolean;
     /** DEV-only experimental transport: adapt one context across one, two, or three ChatGPT messages. */

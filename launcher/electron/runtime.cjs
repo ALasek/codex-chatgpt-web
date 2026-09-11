@@ -1096,6 +1096,40 @@ class RuntimeHost {
     return { ...result, mode, enabled: enabled === true };
   }
 
+  async setWebRouteDefaults(model, effort) {
+    const current = this.runtimeConfigSnapshot();
+    if (!current.configured || !current.config) {
+      throw new Error("Install the Codex integration before changing the Web model");
+    }
+    if (model !== "gpt-5.6-sol" && model !== "gpt-6-astra") {
+      throw new Error("Web model must be GPT-6 Astra or GPT-5.6 Sol");
+    }
+    if (!["low", "medium", "high", "xhigh", "max"].includes(effort)) {
+      throw new Error("Web effort must be low, medium, high, extra high, or max");
+    }
+    if ((effort === "xhigh" || effort === "max") && current.config.proAvailable !== true) {
+      throw new Error("Extra High and Max require an account that exposes those Web modes");
+    }
+    const previous = current.serialized;
+    const next = { ...current.config, webDefaultModel: model, webDefaultEffort: effort };
+    writePrivateFileAtomic(this.supervisor.configPath, `${JSON.stringify(next, null, 2)}\n`);
+    try {
+      await this.supervisor.restart();
+    } catch (error) {
+      writePrivateFileAtomic(this.supervisor.configPath, `${previous}\n`);
+      await this.supervisor.restart().catch(() => {});
+      throw error;
+    }
+    return { model, effort };
+  }
+
+  async clearWebTaskRoutes() {
+    const routePath = path.join(path.dirname(this.supervisor.configPath), "runtime", "thread-model-routes.json");
+    writePrivateFileAtomic(routePath, `${JSON.stringify({ version: 1, threads: {} }, null, 2)}\n`);
+    await this.supervisor.restart();
+    return { cleared: true };
+  }
+
   async setZeroRiskPro(enabled) {
     const current = this.runtimeConfigSnapshot();
     if (!current.configured) {

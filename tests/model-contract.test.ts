@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
-import { CHATGPT_WEB_LUNA_MODEL_ID, CHATGPT_WEB_MODEL_ID, resolveChatGptWebModelMode } from "../src/adapters/chatgpt-web/model";
+import { CHATGPT_WEB_ASTRA_MODEL_ID, CHATGPT_WEB_LUNA_MODEL_ID, CHATGPT_WEB_MODEL_ID, resolveChatGptWebModelMode } from "../src/adapters/chatgpt-web/model";
 
 test("the browser adapter maps fixed routed efforts to the visible ChatGPT modes", () => {
   const capabilities = { localToolsEnabled: true, solAvailable: true, proAvailable: true };
   expect(resolveChatGptWebModelMode(CHATGPT_WEB_MODEL_ID, "low", capabilities)).toMatchObject({
-    displayLabel: "Instant",
+    displayLabel: "Sol · Low",
+    modelLabel: "Sol",
     uiEffortIndex: 0,
     localTools: true,
   });
@@ -23,6 +24,19 @@ test("the browser adapter maps fixed routed efforts to the visible ChatGPT modes
   expect(resolveChatGptWebModelMode(CHATGPT_WEB_MODEL_ID, "max", capabilities)).toMatchObject({
     uiEffortIndex: 4,
     localTools: true,
+  });
+});
+
+test("Astra uses the same explicit effort control without falling back to Sol", () => {
+  expect(resolveChatGptWebModelMode(CHATGPT_WEB_ASTRA_MODEL_ID, "high", {
+    localToolsEnabled: true,
+    solAvailable: true,
+    proAvailable: true,
+  })).toMatchObject({
+    modelId: CHATGPT_WEB_ASTRA_MODEL_ID,
+    displayLabel: "Astra · High",
+    modelLabel: "Astra",
+    uiEffortIndex: 2,
   });
 });
 
@@ -62,7 +76,8 @@ test("Luna-only capability binds the default model without a UI effort selector"
   })).toEqual({
     modelId: CHATGPT_WEB_LUNA_MODEL_ID,
     effort: "low",
-    displayLabel: "Luna",
+      displayLabel: "Luna",
+      modelLabel: "Luna",
     uiEffortIndex: null,
     thinkEnabled: false,
     localTools: true,
@@ -74,7 +89,8 @@ test("Luna-only capability binds the default model without a UI effort selector"
   })).toEqual({
     modelId: CHATGPT_WEB_LUNA_MODEL_ID,
     effort: "medium",
-    displayLabel: "Think",
+      displayLabel: "Think",
+      modelLabel: "Luna",
     uiEffortIndex: null,
     thinkEnabled: true,
     localTools: true,

@@ -14,6 +14,8 @@ const DEFAULT_STATE = Object.freeze({
   browserInteractionMode: "automatic",
   experimentalBiggerContext: false,
   zeroRiskProEnabled: false,
+  webDefaultModel: "gpt-5.6-sol",
+  webDefaultEffort: "high",
   browserSmokePassed: false,
   browserSmokeVersion: null,
   sidebarOpen: true,
@@ -52,6 +54,12 @@ function readState(filePath) {
     }
     if (state.browserInteractionMode !== "automatic" && state.browserInteractionMode !== "manual") {
       state.browserInteractionMode = DEFAULT_STATE.browserInteractionMode;
+    }
+    if (state.webDefaultModel !== "gpt-5.6-sol" && state.webDefaultModel !== "gpt-6-astra") {
+      state.webDefaultModel = DEFAULT_STATE.webDefaultModel;
+    }
+    if (!["low", "medium", "high", "xhigh", "max"].includes(state.webDefaultEffort)) {
+      state.webDefaultEffort = DEFAULT_STATE.webDefaultEffort;
     }
     if (state.coreSetupComplete !== true) {
       if (state.onboardingComplete !== true) state.browserInteractionMode = "automatic";

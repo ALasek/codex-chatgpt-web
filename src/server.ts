@@ -30,11 +30,14 @@ import {
   type CodexModelContextOverride,
 } from "./codex-integration";
 import {
+  CHATGPT_WEB_DEFAULT_MODEL_SLUG,
   CHATGPT_WEB_LUNA_BACKEND_MODEL,
   isChatGptWebModelSlug,
   requireChatGptWebModelRoute,
+  resolveChatGptWebModelPreference,
   type ChatGptWebModelRoute,
 } from "./chatgpt-web-models";
+import { chatGptWebThreadModelStore } from "./web-model-routing";
 import { forwardNativeCodexRequest, type NativeFetch, type NativeImageEndpoint } from "./native-passthrough";
 import {
   buildCompactV1Output,
@@ -362,7 +365,11 @@ export interface ResponseRequestOptions {
 }
 
 export function routeChatGptWebRequest(parsed: CodexParsedRequest, config: AppConfig): ChatGptWebModelRoute {
-  const route = requireChatGptWebModelRoute(parsed.modelId, config);
+  const identity = extractChatGptTurnIdentity(parsed);
+  const preference = parsed.modelId === CHATGPT_WEB_DEFAULT_MODEL_SLUG
+    ? chatGptWebThreadModelStore().resolve(identity.threadId, resolveChatGptWebModelPreference(config))
+    : undefined;
+  const route = requireChatGptWebModelRoute(parsed.modelId, config, preference);
   parsed.modelId = route.backendModel;
   // Zero Risk preserves a distinct backend identity. Its immutable Codex effort is only a
   // protocol/catalog value; the manual adapter must never reinterpret it as a ChatGPT selection.
@@ -705,7 +712,11 @@ export async function compactRequest(
   }
   let route: ChatGptWebModelRoute;
   try {
-    route = requireChatGptWebModelRoute(raw.model, config);
+    const identity = extractCodexTurnIdentityFromBody(raw);
+    const preference = raw.model === CHATGPT_WEB_DEFAULT_MODEL_SLUG
+      ? chatGptWebThreadModelStore().resolve(identity.threadId, resolveChatGptWebModelPreference(config))
+      : undefined;
+    route = requireChatGptWebModelRoute(raw.model, config, preference);
   } catch (error) {
     return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
   }

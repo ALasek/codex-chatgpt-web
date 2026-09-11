@@ -5,7 +5,7 @@ Codex app / CLI
       │ Responses API on loopback
       ▼
 launcher-owned codex-chatgpt-web daemon
-  ├─ official /models passthrough + fixed ChatGPT Web models
+  ├─ official /models passthrough + one launcher-controlled ChatGPT Web model
   ├─ native Responses passthrough or ChatGPT Responses/SSE bridge
   ├─ authenticated native Search and Image Gen request forwarding
   ├─ ChatGPT browser worker (up to five task-bound Electron tabs)
@@ -21,17 +21,18 @@ launcher-owned codex-chatgpt-web daemon
 
 ### `browser-only`
 
-- Exposes Instant (`chatgpt-web/light`), Medium, High, and Extra High; each model advertises exactly one
-  immutable Codex effort matching its ChatGPT browser mode. `chatgpt-web/pro` is appended only when
-  the authenticated account exposes Pro.
+- Exposes one `chatgpt-web/default` row. The launcher selects Astra or Sol and the effort for each
+  task's first Web turn; the task retains that selection across later native/Web switches.
+- Advertises the Web row as multi-agent disabled and also blocks spawn calls in the prompt and tool
+  gateway, so Web usage cannot multiply through delegated browser chats.
 - Sends the complete Codex context and image attachments to a fresh ChatGPT Temporary Chat.
 - Never starts the broker, tunnel, or MCP server.
 - Emits a nonfatal Codex commentary warning that local tools are unavailable for the selected model.
 
 ### `full`
 
-- Exposes the same fixed models and attaches the turn-bound connector capability to every available
-  effort, from Luna through Pro. There are no effort-specific MCP exclusions.
+- Exposes the same launcher-controlled model and attaches the turn-bound connector capability at
+  every supported effort, from Luna through Astra/Sol Max.
 - ChatGPT uses a custom MCP connector backed by `openai/tunnel-client`.
 - Every connector call presents one outer Codex turn capability; the MCP server keeps the derived
   binding private and dispatches the requested action immediately.

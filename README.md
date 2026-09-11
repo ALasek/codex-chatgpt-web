@@ -22,9 +22,9 @@
   <img src="https://img.shields.io/badge/Free_AI-no_API_fees-10a37f" alt="Free AI with no API fees">
 </p>
 
-Free and Go accounts get **ChatGPT Web — Luna** in Codex's native model picker. Accounts that
-expose the reasoning selector keep **Instant**, **Medium**, **High**, **Extra High**, and **Pro** as
-their subscription allows. The bridge sends the current compiled Codex task context to a fresh
+Codex gets one uncluttered **ChatGPT Web** row. The desktop app selects **Astra** or **Sol** and the
+effort used by new Web tasks; the first Web turn pins that choice to the task, including across
+native-to-Web model switches. Luna-only accounts use the same row automatically. The bridge sends the current compiled Codex task context to a fresh
 ChatGPT Temporary Chat, attaches images, and streams visible reasoning, tool activity, and Markdown
 back into the same Codex task.
 
@@ -50,7 +50,8 @@ connects ChatGPT back to the tools of that same Codex task until its next compac
 
 ## Highlights
 
-- **Native Codex models.** ChatGPT Web runs from Codex's model picker while the original task UI,
+- **One native Codex model.** ChatGPT Web runs from one Codex picker row while the launcher owns its
+  compact Astra/Sol and effort selector. The original task UI,
   context lifecycle, streaming, tracing, and tool presentation stay intact.
 - **The full Codex harness over MCP.** Full mode gives every effort exposed by the signed-in account,
   including Pro, the active task's filesystem, shell, images, approvals, and configured tools/apps.
@@ -87,13 +88,16 @@ curl -fsSL https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/
 irm https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/install-launcher.ps1 | iex
 ```
 
-Then complete the three checks in the app:
+On a new installation, complete the three checks in the app:
 
 1. Sign in directly in the launcher's embedded ChatGPT browser. Login pages and identity-provider
    windows stay inside the same launcher-owned private browser profile; no session is copied between
    browsers.
 2. Run the browser smoke test.
-3. Press **Install models**, restart Codex once, and select a **ChatGPT Web — …** model.
+3. Press **Install models**, restart Codex once, and select **ChatGPT Web**.
+
+After installation, the launcher opens directly to the browser. Sign-in and smoke-test actions stay
+available on Setup for repair, but they no longer gate normal startup.
 
 The launcher detects the current account's ChatGPT controls during setup: Free/Go accounts expose
 only Luna, while Pro appears only when the signed-in account exposes it. The separate **MCP** page

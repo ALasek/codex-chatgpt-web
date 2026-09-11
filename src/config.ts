@@ -4,8 +4,12 @@ import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  CHATGPT_WEB_ASTRA_BACKEND_MODEL,
+  CHATGPT_WEB_BACKEND_MODEL,
   CHATGPT_WEB_ZERO_RISK_BACKEND_MODEL,
   CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL,
+  type ChatGptWebAdapterEffort,
+  type ChatGptWebPreferredModel,
 } from "./chatgpt-web-models";
 import type { CodexProviderConfig } from "./types";
 import { VERSION } from "./version";
@@ -83,6 +87,9 @@ export interface AppConfig {
   headed: boolean;
   solAvailable: boolean;
   proAvailable: boolean;
+  /** Launcher-controlled defaults captured when a Codex task first uses ChatGPT Web. */
+  webDefaultModel: ChatGptWebPreferredModel;
+  webDefaultEffort: ChatGptWebAdapterEffort;
   experimentalBiggerContext: boolean;
   /** Explicitly install the additional Pro-sized model row while Zero Risk is active. */
   zeroRiskProEnabled: boolean;
@@ -211,6 +218,8 @@ export function defaultConfig(mode: RuntimeMode = "browser-only"): AppConfig {
     headed: true,
     solAvailable: true,
     proAvailable: false,
+    webDefaultModel: CHATGPT_WEB_BACKEND_MODEL,
+    webDefaultEffort: "high",
     experimentalBiggerContext: false,
     zeroRiskProEnabled: false,
     autoApproveToolCalls: false,
@@ -486,6 +495,15 @@ function parseConfig(value: unknown, path: string): AppConfig {
   if (parsed.solAvailable !== undefined && typeof parsed.solAvailable !== "boolean") {
     throw new Error(`Invalid solAvailable in ${path}`);
   }
+  if (parsed.webDefaultModel !== undefined
+    && parsed.webDefaultModel !== CHATGPT_WEB_BACKEND_MODEL
+    && parsed.webDefaultModel !== CHATGPT_WEB_ASTRA_BACKEND_MODEL) {
+    throw new Error(`Invalid webDefaultModel in ${path}`);
+  }
+  if (parsed.webDefaultEffort !== undefined
+    && !["low", "medium", "high", "xhigh", "max"].includes(String(parsed.webDefaultEffort))) {
+    throw new Error(`Invalid webDefaultEffort in ${path}`);
+  }
   if (parsed.experimentalBiggerContext !== undefined
     && typeof parsed.experimentalBiggerContext !== "boolean") {
     throw new Error(`Invalid experimentalBiggerContext in ${path}`);
@@ -501,6 +519,10 @@ function parseConfig(value: unknown, path: string): AppConfig {
   const proAvailable = parsed.proAvailable === true;
   const experimentalBiggerContext = parsed.experimentalBiggerContext === true;
   const zeroRiskProEnabled = parsed.zeroRiskProEnabled === true;
+  const webDefaultModel = parsed.webDefaultModel === CHATGPT_WEB_ASTRA_BACKEND_MODEL
+    ? CHATGPT_WEB_ASTRA_BACKEND_MODEL
+    : CHATGPT_WEB_BACKEND_MODEL;
+  const webDefaultEffort = (parsed.webDefaultEffort ?? "high") as ChatGptWebAdapterEffort;
   if (browserInteractionMode === "manual" && experimentalBiggerContext) {
     throw new Error(`Zero Risk does not support Bigger Context in ${path}`);
   }
@@ -516,6 +538,8 @@ function parseConfig(value: unknown, path: string): AppConfig {
     subagentProtocol,
     solAvailable,
     proAvailable,
+    webDefaultModel,
+    webDefaultEffort,
     experimentalBiggerContext,
     zeroRiskProEnabled,
   } as AppConfig;
@@ -531,13 +555,13 @@ export function providerConfig(config: AppConfig): CodexProviderConfig {
   const manual = config.browserInteractionMode === "manual";
   const model = manual
     ? CHATGPT_WEB_ZERO_RISK_BACKEND_MODEL
-    : config.solAvailable ? "gpt-5.6-sol" : "gpt-5.6-luna";
+    : config.solAvailable ? config.webDefaultModel : "gpt-5.6-luna";
   const models = manual
     ? [
       CHATGPT_WEB_ZERO_RISK_BACKEND_MODEL,
       ...(config.zeroRiskProEnabled ? [CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL] : []),
     ]
-    : [model];
+    : config.solAvailable ? [CHATGPT_WEB_BACKEND_MODEL, CHATGPT_WEB_ASTRA_BACKEND_MODEL] : [model];
   const efforts = manual
     ? ["low"]
     : config.solAvailable
@@ -570,6 +594,8 @@ export function providerConfig(config: AppConfig): CodexProviderConfig {
       localToolsEnabled: config.mode === "full",
       solAvailable: manual ? false : config.solAvailable,
       proAvailable: manual ? false : config.proAvailable,
+      webDefaultModel: config.webDefaultModel,
+      webDefaultEffort: config.webDefaultEffort,
       experimentalBiggerContext: manual ? false : config.experimentalBiggerContext,
       ...(config.stallTimeoutSec !== undefined ? { stallTimeoutSec: config.stallTimeoutSec } : {}),
       autoApproveToolCalls: manual ? false : config.autoApproveToolCalls,

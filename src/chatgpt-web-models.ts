@@ -1,5 +1,7 @@
 export const CHATGPT_WEB_MODEL_PREFIX = "chatgpt-web/";
+export const CHATGPT_WEB_DEFAULT_MODEL_SLUG = "chatgpt-web/default";
 export const CHATGPT_WEB_BACKEND_MODEL = "gpt-5.6-sol";
+export const CHATGPT_WEB_ASTRA_BACKEND_MODEL = "gpt-6-astra";
 export const CHATGPT_WEB_LUNA_BACKEND_MODEL = "gpt-5.6-luna";
 /** Internal adapter identity for a turn whose ChatGPT model is selected by the user in the launcher. */
 export const CHATGPT_WEB_ZERO_RISK_BACKEND_MODEL = "chatgpt-web-zero-risk";
@@ -8,6 +10,7 @@ export const CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL = "chatgpt-web-zero-risk-pr
 
 export type ChatGptWebAutomaticBackendModel =
   | typeof CHATGPT_WEB_BACKEND_MODEL
+  | typeof CHATGPT_WEB_ASTRA_BACKEND_MODEL
   | typeof CHATGPT_WEB_LUNA_BACKEND_MODEL;
 export type ChatGptWebBackendModel =
   | ChatGptWebAutomaticBackendModel
@@ -18,6 +21,14 @@ export type ChatGptWebZeroRiskBackendModel =
 
 export type ChatGptWebCodexEffort = "low" | "medium" | "high" | "xhigh" | "ultra";
 export type ChatGptWebAdapterEffort = "low" | "medium" | "high" | "xhigh" | "max";
+export type ChatGptWebPreferredModel =
+  | typeof CHATGPT_WEB_BACKEND_MODEL
+  | typeof CHATGPT_WEB_ASTRA_BACKEND_MODEL;
+
+export interface ChatGptWebModelPreference {
+  model: ChatGptWebPreferredModel;
+  effort: ChatGptWebAdapterEffort;
+}
 
 /**
  * Measured Plus browser transport windows, including the fixed hidden ChatGPT platform reserve.
@@ -201,7 +212,7 @@ export function resolveChatGptWebTransportLimits(
  * Bigger Context expands the transaction, never this per-message budget.
  */
 export function resolveChatGptWebMessageTokenBudget(
-  backendModel: typeof CHATGPT_WEB_BACKEND_MODEL,
+  backendModel: ChatGptWebAutomaticBackendModel,
   effort: ChatGptWebAdapterEffort,
   capabilities: ChatGptWebAccountCapabilities,
   imageTokens = 0,
@@ -242,6 +253,8 @@ export type ChatGptWebModelRoute = ChatGptWebAutomaticModelRoute | ChatGptWebZer
 export interface ChatGptWebAccountCapabilities {
   solAvailable: boolean;
   proAvailable: boolean;
+  webDefaultModel?: ChatGptWebPreferredModel;
+  webDefaultEffort?: ChatGptWebAdapterEffort;
   experimentalBiggerContext?: boolean;
   browserInteractionMode?: "automatic" | "manual";
   zeroRiskProEnabled?: boolean;
@@ -297,6 +310,47 @@ export const CHATGPT_WEB_LUNA_MODEL_ROUTES: readonly ChatGptWebModelRoute[] = [
   CHATGPT_WEB_LUNA_MODEL_ROUTE,
   CHATGPT_WEB_LUNA_THINK_MODEL_ROUTE,
 ];
+
+export function resolveChatGptWebModelPreference(
+  capabilities: ChatGptWebAccountCapabilities,
+): ChatGptWebModelPreference {
+  const model = capabilities.webDefaultModel ?? CHATGPT_WEB_BACKEND_MODEL;
+  const effort = capabilities.webDefaultEffort ?? "high";
+  if ((effort === "xhigh" || effort === "max") && !capabilities.proAvailable) {
+    throw new Error(`ChatGPT Web ${effort} effort is not available for this account`);
+  }
+  return { model, effort };
+}
+
+export function chatGptWebDefaultModelRoute(
+  capabilities: ChatGptWebAccountCapabilities,
+  preference: ChatGptWebModelPreference = resolveChatGptWebModelPreference(capabilities),
+): ChatGptWebAutomaticModelRoute {
+  if (!capabilities.solAvailable) {
+    return {
+      slug: CHATGPT_WEB_DEFAULT_MODEL_SLUG,
+      displayName: "ChatGPT Web",
+      description: "ChatGPT Web through the native Codex harness; configure the model in Codex Web GPT.",
+      interactionMode: "automatic",
+      backendModel: CHATGPT_WEB_LUNA_BACKEND_MODEL,
+      codexEffort: "low",
+      adapterEffort: "low",
+      requiresPro: false,
+    };
+  }
+  return {
+    slug: CHATGPT_WEB_DEFAULT_MODEL_SLUG,
+    displayName: "ChatGPT Web",
+    description: "ChatGPT Web through the native Codex harness; model and effort are configured in Codex Web GPT.",
+    interactionMode: "automatic",
+    backendModel: preference.model,
+    // Codex currently insists on rendering an effort row. Keep one inert protocol value while
+    // the launcher owns the real, task-pinned model and effort selection.
+    codexEffort: "low",
+    adapterEffort: preference.effort,
+    requiresPro: preference.effort === "xhigh" || preference.effort === "max",
+  };
+}
 
 /**
  * The selected Codex model is the authoritative ChatGPT browser mode. Codex's signed desktop UI
@@ -382,20 +436,20 @@ export function availableChatGptWebModelRoutes(
       ? [CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE, CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE]
       : [CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE];
   }
-  if (!capabilities.solAvailable) return CHATGPT_WEB_LUNA_MODEL_ROUTES;
-  return capabilities.proAvailable
-    ? CHATGPT_WEB_MODEL_ROUTES
-    : CHATGPT_WEB_MODEL_ROUTES.filter(route => !route.requiresPro);
+  return [chatGptWebDefaultModelRoute(capabilities)];
 }
 
 export function requireChatGptWebModelRoute(
   modelId: string,
   capabilities: ChatGptWebAccountCapabilities,
+  preference?: ChatGptWebModelPreference,
 ): ChatGptWebModelRoute {
   if (capabilities.browserInteractionMode === "manual" && capabilities.experimentalBiggerContext) {
     throw new Error("Zero Risk does not support Bigger Context");
   }
-  const route = routesBySlug.get(modelId);
+  const route = modelId === CHATGPT_WEB_DEFAULT_MODEL_SLUG
+    ? chatGptWebDefaultModelRoute(capabilities, preference)
+    : routesBySlug.get(modelId);
   if (!route) throw new Error(`ChatGPT web model is not enabled: ${modelId}`);
   if (capabilities.browserInteractionMode === "manual") {
     if (route.interactionMode !== "manual") {

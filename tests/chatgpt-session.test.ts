@@ -7,6 +7,7 @@ import {
   CHATGPT_EFFORT_SLIDER_CONTAINER_SELECTOR,
   activateChatGptEffortMenu,
   detectChatGptAccountCapabilities,
+  selectChatGptModelFromMenu,
 } from "../src/chatgpt-session";
 
 test("composer and effort selectors exclude unrelated editable fields and menu buttons", () => {
@@ -244,7 +245,7 @@ function reasoningPicker(options: { max?: string; delay?: number; missing?: bool
     getAttribute: async (name: string) => name === "aria-expanded" ? "true" : null,
   };
   const composer = { filter() { return this; }, last() { return this; }, locator: () => ({ locator: () => control }) };
-  const modelRows = { count: async () => 3, first() { return this; }, waitFor: async () => {}, nth: () => { throw new Error("Model rows are not effort choices"); } };
+  const modelRows = { count: async () => 0, first() { return this; }, waitFor: async () => {}, nth: () => { throw new Error("No model rows expected"); } };
   const menu = { filter() { return this; }, last() { return this; }, isVisible: async () => true, locator: () => modelRows };
   const page = {
     locator: (selector: string) => {
@@ -281,4 +282,33 @@ test("Pro selection changes the hidden slider through its visible owner, never t
   await select.call({ activeComposer: async () => fixture.composer }, fixture.page, "gpt-5.6-sol", "max", { localToolsEnabled: false, solAvailable: true, proAvailable: true });
   expect(fixture.keys).toEqual(["ArrowRight", "ArrowRight", "ArrowRight", "ArrowRight"]);
   expect(fixture.value()).toBe(4);
+});
+
+test("model selection chooses Astra explicitly and preserves an already-selected Sol row", async () => {
+  const clicks: string[] = [];
+  const rows = [
+    { label: "GPT-5.6 Sol", checked: true },
+    { label: "GPT-6 Astra", checked: false },
+  ].map(row => ({
+    isVisible: async () => true,
+    getAttribute: async (name: string) => name === "aria-label"
+      ? row.label
+      : name === "aria-checked" ? String(row.checked) : null,
+    innerText: async () => row.label,
+    click: async () => { clicks.push(row.label); },
+  }));
+  const items = { count: async () => rows.length, nth: (index: number) => rows[index] };
+  const menu = { locator: () => items };
+
+  await expect(selectChatGptModelFromMenu(menu as never, "Sol")).resolves.toBe("already-selected");
+  await expect(selectChatGptModelFromMenu(menu as never, "Astra")).resolves.toBe("selected");
+  expect(clicks).toEqual(["GPT-6 Astra"]);
+});
+
+test("model selection fails closed when Astra is absent from a legacy Sol-only picker", async () => {
+  const items = { count: async () => 0, nth: () => undefined };
+  const menu = { locator: () => items };
+  await expect(selectChatGptModelFromMenu(menu as never, "Sol")).resolves.toBe("implicit-sol");
+  await expect(selectChatGptModelFromMenu(menu as never, "Astra"))
+    .rejects.toThrow("does not expose the requested Astra model");
 });

@@ -41,6 +41,7 @@ import {
 import { connectTunnel, createTunnelConfig, installRuntimeKey, installRuntimeKeyBytes, installTunnelClient, managedRuntimeKeyPath, stopTunnel, waitForTunnelReady } from "./tunnel";
 import { getTunnelServiceStatus, installTunnelService, restartTunnelService, stopTunnelService, tunnelServiceDefinitionMatches, uninstallTunnelService } from "./tunnel-service";
 import { VERSION } from "./version";
+import type { ChatGptWebAdapterEffort, ChatGptWebPreferredModel } from "./chatgpt-web-models";
 
 export interface SetupOptions {
   mode: RuntimeMode;
@@ -54,6 +55,8 @@ export interface SetupOptions {
   autoApproveToolCalls?: boolean;
   experimentalBiggerContext?: boolean;
   zeroRiskProEnabled?: boolean;
+  webDefaultModel?: ChatGptWebPreferredModel;
+  webDefaultEffort?: ChatGptWebAdapterEffort;
   replaceCodexRoute?: boolean;
   restartService?: boolean;
   acknowledgedUnofficial?: boolean;
@@ -273,6 +276,8 @@ function baseConfig(
     }
     config.zeroRiskProEnabled = options.zeroRiskProEnabled;
   }
+  if (options.webDefaultModel !== undefined) config.webDefaultModel = options.webDefaultModel;
+  if (options.webDefaultEffort !== undefined) config.webDefaultEffort = options.webDefaultEffort;
   if (config.browserInteractionMode === "manual") {
     if (options.refreshAccountCapabilities) {
       throw new Error("Zero Risk cannot refresh account capabilities");

@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { chatGptConversationKey } from "../src/adapters/chatgpt-web/conversation-key";
 import {
   availableChatGptWebModelRoutes,
+  CHATGPT_WEB_ASTRA_BACKEND_MODEL,
   CHATGPT_WEB_BACKEND_MODEL,
+  CHATGPT_WEB_DEFAULT_MODEL_SLUG,
   CHATGPT_WEB_LUNA_BACKEND_MODEL,
   CHATGPT_WEB_LUNA_MODEL_ROUTE,
   CHATGPT_WEB_LUNA_MODEL_ROUTES,
@@ -31,11 +33,11 @@ function parsed(modelId: string, reasoning = "medium"): CodexParsedRequest {
   };
 }
 
-describe("fixed ChatGPT Web model routes", () => {
+describe("ChatGPT Web model routes", () => {
   const plus = { solAvailable: true, proAvailable: false };
   const pro = { solAvailable: true, proAvailable: true };
 
-  test("uses unique stable slugs and one explicit adapter effort per model", () => {
+  test("keeps old fixed slugs available for existing tasks", () => {
     expect(new Set(CHATGPT_WEB_MODEL_ROUTES.map(route => route.slug)).size).toBe(CHATGPT_WEB_MODEL_ROUTES.length);
     expect(CHATGPT_WEB_MODEL_ROUTES.map(route => [route.slug, route.codexEffort, route.adapterEffort])).toEqual([
       ["chatgpt-web/light", "low", "low"],
@@ -47,23 +49,35 @@ describe("fixed ChatGPT Web model routes", () => {
     expect(CHATGPT_WEB_MODEL_ROUTES[0]?.displayName).toBe("ChatGPT Web — Instant");
   });
 
-  test("exposes only Plus-eligible routes without the Pro account capability", () => {
-    expect(availableChatGptWebModelRoutes(plus).map(route => route.slug)).toEqual([
-      "chatgpt-web/light",
-      "chatgpt-web/medium",
-      "chatgpt-web/high",
-    ]);
-    expect(availableChatGptWebModelRoutes({ solAvailable: true, proAvailable: true }))
-      .toEqual(CHATGPT_WEB_MODEL_ROUTES);
+  test("exposes one launcher-controlled row while preserving legacy route validation", () => {
+    expect(availableChatGptWebModelRoutes(plus)).toEqual([expect.objectContaining({
+      slug: CHATGPT_WEB_DEFAULT_MODEL_SLUG,
+      backendModel: CHATGPT_WEB_BACKEND_MODEL,
+      adapterEffort: "high",
+      codexEffort: "low",
+    })]);
+    expect(availableChatGptWebModelRoutes({
+      solAvailable: true,
+      proAvailable: true,
+      webDefaultModel: CHATGPT_WEB_ASTRA_BACKEND_MODEL,
+      webDefaultEffort: "max",
+    })).toEqual([expect.objectContaining({
+      slug: CHATGPT_WEB_DEFAULT_MODEL_SLUG,
+      backendModel: CHATGPT_WEB_ASTRA_BACKEND_MODEL,
+      adapterEffort: "max",
+    })]);
     expect(() => requireChatGptWebModelRoute("chatgpt-web/extra-high", plus))
       .toThrow("Extra High is not available for this account");
     expect(() => requireChatGptWebModelRoute("chatgpt-web/pro", plus))
       .toThrow("Pro is not available for this account");
   });
 
-  test("exposes Luna and Think when the authenticated account has no Sol selector", () => {
+  test("uses the same single row for Luna-only accounts and keeps old aliases compatible", () => {
     const free = { solAvailable: false, proAvailable: false };
-    expect(availableChatGptWebModelRoutes(free)).toEqual(CHATGPT_WEB_LUNA_MODEL_ROUTES);
+    expect(availableChatGptWebModelRoutes(free)).toEqual([expect.objectContaining({
+      slug: CHATGPT_WEB_DEFAULT_MODEL_SLUG,
+      backendModel: CHATGPT_WEB_LUNA_BACKEND_MODEL,
+    })]);
     expect(requireChatGptWebModelRoute("chatgpt-web/luna", free).backendModel)
       .toBe(CHATGPT_WEB_LUNA_BACKEND_MODEL);
     expect(requireChatGptWebModelRoute("chatgpt-web/think", free))
@@ -215,13 +229,16 @@ describe("fixed ChatGPT Web model routes", () => {
     });
   });
 
-  test("binds the selected model authoritatively and ignores a conflicting request effort", () => {
-    const request = parsed("chatgpt-web/high", "low");
+  test("binds the launcher default authoritatively and ignores Codex's inert effort", () => {
+    const request = parsed(CHATGPT_WEB_DEFAULT_MODEL_SLUG, "low");
     const rawSnapshot = structuredClone(request._rawBody);
-    const route = routeChatGptWebRequest(request, defaultConfig("browser-only"));
+    const config = defaultConfig("browser-only");
+    config.webDefaultModel = CHATGPT_WEB_ASTRA_BACKEND_MODEL;
+    config.webDefaultEffort = "high";
+    const route = routeChatGptWebRequest(request, config);
 
-    expect(route.slug).toBe("chatgpt-web/high");
-    expect(request.modelId).toBe(CHATGPT_WEB_BACKEND_MODEL);
+    expect(route.slug).toBe(CHATGPT_WEB_DEFAULT_MODEL_SLUG);
+    expect(request.modelId).toBe(CHATGPT_WEB_ASTRA_BACKEND_MODEL);
     expect(request.options.reasoning).toBe("high");
     expect(request._rawBody).toEqual(rawSnapshot);
   });

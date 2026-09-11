@@ -22,6 +22,7 @@ import {
   type ChatGptMarkdownSegment,
 } from "./markdown";
 import {
+  CHATGPT_WEB_ASTRA_MODEL_ID,
   CHATGPT_WEB_LUNA_MODEL_ID,
   CHATGPT_WEB_MODEL_ID,
   resolveChatGptWebModelMode,
@@ -58,6 +59,7 @@ import {
   activateChatGptEffortMenu,
   detectChatGptAccountCapabilities,
   parseChatGptEffortSliderState,
+  selectChatGptModelFromMenu,
 } from "../../chatgpt-session";
 import { loginVerificationMarkerPath } from "../../browser-login";
 import {
@@ -830,7 +832,9 @@ export function assertChatGptWebInputWithinLimits(
   capabilities: ChatGptWebCapabilities,
   promptChars?: number,
 ): void {
-  if (modelId !== CHATGPT_WEB_MODEL_ID && modelId !== CHATGPT_WEB_LUNA_MODEL_ID) {
+  if (modelId !== CHATGPT_WEB_MODEL_ID
+    && modelId !== CHATGPT_WEB_ASTRA_MODEL_ID
+    && modelId !== CHATGPT_WEB_LUNA_MODEL_ID) {
     throw new Error(`ChatGPT web context limit is not defined for model: ${modelId}`);
   }
   if (
@@ -894,7 +898,7 @@ export function assertChatGptWebMultipartInputWithinLimits(
       { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
     );
   }
-  if (modelId !== CHATGPT_WEB_MODEL_ID) {
+  if (modelId !== CHATGPT_WEB_MODEL_ID && modelId !== CHATGPT_WEB_ASTRA_MODEL_ID) {
     throw new Error(`ChatGPT Bigger Context limit is not defined for model: ${modelId}`);
   }
   const { contextWindow: baseContextWindow } = resolveChatGptWebContextLimits(
@@ -973,7 +977,7 @@ export function resolveChatGptWebMultipartStagingMode(
       { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
     );
   }
-  if (modelId !== CHATGPT_WEB_MODEL_ID) {
+  if (modelId !== CHATGPT_WEB_MODEL_ID && modelId !== CHATGPT_WEB_ASTRA_MODEL_ID) {
     throw new Error(`ChatGPT Bigger Context staging mode is not defined for model: ${modelId}`);
   }
   const efforts: readonly ChatGptWebModelMode["effort"][] = capabilities.proAvailable
@@ -2340,7 +2344,7 @@ export class ChatGptBrowserWorker {
       if (!mode.thinkEnabled) await setChatGptThinkMode(composerForm, false, captureDiagnostic);
       return mode;
     }
-    const currentEffort = composerForm.locator(CHATGPT_EFFORT_CONTROL_SELECTOR).last();
+    let currentEffort = composerForm.locator(CHATGPT_EFFORT_CONTROL_SELECTOR).last();
     const effortWaitAbort = new AbortController();
     try {
       const ready = await Promise.race([
@@ -2361,11 +2365,23 @@ export class ChatGptBrowserWorker {
     await throwIfChatGptRateLimitDialog(page);
     await captureDiagnostic?.("effort-control-ready");
     await throwIfChatGptRateLimitDialog(page);
-    const activation = await activateChatGptEffortMenu(page, currentEffort);
+    let activation = await activateChatGptEffortMenu(page, currentEffort);
     if (activation.method === "pointerdown") {
       await captureDiagnostic?.("effort-menu-pointerdown-fallback");
     }
     await captureDiagnostic?.("effort-menu-open-requested");
+    if (mode.modelLabel === "Luna") throw new Error("Selectable ChatGPT mode unexpectedly resolved to Luna");
+    const modelSelection = await selectChatGptModelFromMenu(activation.menu, mode.modelLabel);
+    if (modelSelection === "selected") {
+      await settleChatGptUi();
+      const refreshedComposer = await this.activeComposer(page);
+      currentEffort = refreshedComposer
+        .locator("xpath=ancestor::form[1]")
+        .locator(CHATGPT_EFFORT_CONTROL_SELECTOR)
+        .last();
+      activation = await activateChatGptEffortMenu(page, currentEffort);
+      await captureDiagnostic?.("model-selected");
+    }
     const effortSlider = activation.slider;
     const sliderContainer = activation.sliderContainer;
     const waitAbort = new AbortController();

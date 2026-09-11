@@ -41,20 +41,8 @@ function modelPriority(template: JsonObject): number | undefined {
 
 function routedModelPriority(
   template: JsonObject,
-  route: ChatGptWebModelRoute,
-  config: AppConfig,
 ): number | undefined {
-  const priority = modelPriority(template);
-  if (priority === undefined
-    || config.subagentProtocol !== "compatibility-v1"
-    || route.slug !== "chatgpt-web/light") return priority;
-  if (priority === Number.MAX_SAFE_INTEGER) {
-    throw new Error("Native Codex model template priority cannot reserve the Compatibility V1 roster");
-  }
-  // Codex V1 exposes at most five model overrides. Keep the native Sol row plus the four useful
-  // delegated Web efforts (Medium, High, Extra High, Pro); Instant remains a selectable root model
-  // but does not displace Pro from spawn_agent's bounded registry.
-  return priority + 1;
+  return modelPriority(template);
 }
 
 function nativeTemplateCandidate(value: unknown, requireTools: boolean): value is JsonObject {
@@ -89,11 +77,6 @@ function useCompatibilityV1SubagentSurface(model: JsonObject): void {
   if (model.multi_agent_version !== "disabled") model.multi_agent_version = "v1";
 }
 
-function routedSubagentVersion(template: JsonObject, config: AppConfig): string | undefined {
-  if (config.subagentProtocol === "compatibility-v1") return "v1";
-  return typeof template.multi_agent_version === "string" ? template.multi_agent_version : undefined;
-}
-
 export function buildChatGptWebModel(
   templateValue: unknown,
   route: ChatGptWebModelRoute,
@@ -105,8 +88,7 @@ export function buildChatGptWebModel(
     throw new Error("ChatGPT Web model template must be a native Codex model");
   }
   const limits = resolveChatGptWebContextLimits(route.backendModel, route.adapterEffort, config);
-  const multiAgentVersion = routedSubagentVersion(template, config);
-  const priority = routedModelPriority(template, route, config);
+  const priority = routedModelPriority(template);
   const model: JsonObject = {
     ...structuredClone(template),
     slug: route.slug,
@@ -121,12 +103,9 @@ export function buildChatGptWebModel(
     // spawn-agent overrides; forcing every routed row to priority 0 displaced gpt-5.6-sol from that
     // registry and made an explicit native child model fail validation.
     ...(priority === undefined ? {} : { priority }),
-    // In native mode the routed row follows the official template's protocol surface. Web-origin
-    // V2 collaboration calls carry the protocol's explicit plaintext marker; Compatibility V1
-    // instead pins the entire catalog and Codex feature override to V1.
-    ...(multiAgentVersion === undefined
-      ? {}
-      : { multi_agent_version: multiAgentVersion }),
+    // Every browser message consumes ChatGPT Web quota. Keep native Codex models unchanged, but
+    // prevent this routed row from appearing as a spawn target or receiving collaboration tools.
+    multi_agent_version: "disabled",
     // Code mode collapses the outer registry into an exec gateway; routed models need the regular
     // Responses tool surface so MCP namespaces, deferred tool_search, and custom tools reach us.
     tool_mode: null,

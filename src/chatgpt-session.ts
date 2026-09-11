@@ -46,6 +46,46 @@ export interface ChatGptEffortActivation {
   slider: Locator;
 }
 
+export type ChatGptSelectableModel = "Sol" | "Astra";
+
+function modelLabelMatches(text: string, model: ChatGptSelectableModel): boolean {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return model === "Astra"
+    ? /(?:\bAstra\b|\bGPT[- ]?6\b)/i.test(normalized)
+    : /(?:\bSol\b|\bGPT[- ]?5\.6\b)/i.test(normalized);
+}
+
+/** Select an explicit ChatGPT model when the current picker exposes model radio rows. */
+export async function selectChatGptModelFromMenu(
+  menu: Locator,
+  model: ChatGptSelectableModel,
+): Promise<"selected" | "already-selected" | "implicit-sol"> {
+  const items = menu.locator(CHATGPT_EFFORT_ITEM_SELECTOR);
+  const count = await items.count();
+  let sawNamedModel = false;
+  for (let index = 0; index < count; index += 1) {
+    const item = items.nth(index);
+    if (!await item.isVisible().catch(() => false)) continue;
+    const text = [
+      await item.getAttribute("aria-label").catch(() => null),
+      await item.getAttribute("data-model-id").catch(() => null),
+      await item.getAttribute("data-testid").catch(() => null),
+      await item.innerText().catch(() => ""),
+    ].filter(Boolean).join(" ");
+    if (modelLabelMatches(text, "Sol") || modelLabelMatches(text, "Astra")) sawNamedModel = true;
+    if (!modelLabelMatches(text, model)) continue;
+    const selected = await item.getAttribute("aria-checked").catch(() => null) === "true"
+      || await item.getAttribute("data-state").catch(() => null) === "checked";
+    if (selected) return "already-selected";
+    await item.click({ force: true });
+    return "selected";
+  }
+  // Older Sol-only pickers expose only the effort slider. Preserve that proven path, but never
+  // pretend Astra was selected when ChatGPT offered no matching model row.
+  if (model === "Sol" && !sawNamedModel) return "implicit-sol";
+  throw new Error(`ChatGPT does not expose the requested ${model} model in its current picker`);
+}
+
 export function chatGptEffortSlider(page: Page): { sliderContainer: Locator; slider: Locator } {
   const sliderContainer = page.locator(CHATGPT_EFFORT_SLIDER_CONTAINER_SELECTOR).filter({ visible: true }).last();
   // The current picker keeps ARIA values on a zero-width, aria-hidden semantic input.

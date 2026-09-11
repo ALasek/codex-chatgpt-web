@@ -773,6 +773,24 @@ function registerIpc({ logger, stateStore }) {
     if (!IS_DEV_PROFILE) startCatalogVerificationMonitor({ logger, stateStore });
     return state;
   });
+  handle("launcher:web-route-defaults", async (_event, model, effort) => {
+    const browserOperation = browserHost.currentOperation();
+    if (browserHost.activeTraceId || browserOperation) {
+      throw new Error(
+        browserHost.activeTraceId
+          ? "Finish or cancel active ChatGPT turns before changing Web model defaults"
+          : `Finish ${browserOperation} before changing Web model defaults`,
+      );
+    }
+    const result = await runtimeHost.setWebRouteDefaults(model, effort);
+    const state = stateStore.update({
+      webDefaultModel: result.model,
+      webDefaultEffort: result.effort,
+    });
+    send("launcher:state-changed", state);
+    return state;
+  });
+  handle("launcher:web-route-clear", () => runtimeHost.clearWebTaskRoutes());
   handle("launcher:browser-interaction-mode", async (_event, rawMode) => {
     const mode = validateBrowserInteractionMode(rawMode);
     const current = stateStore.read();
@@ -998,6 +1016,21 @@ async function start() {
     getBrowserInteractionMode: () => stateStore.read().browserInteractionMode,
   });
   const configuredInteractionMode = runtimeHost.runtimeConfigSnapshot().config?.browserInteractionMode;
+  const configuredRuntimeAtLaunch = runtimeHost.runtimeConfigSnapshot();
+  if (configuredRuntimeAtLaunch.configured && configuredRuntimeAtLaunch.config) {
+    const config = configuredRuntimeAtLaunch.config;
+    stateStore.update({
+      onboardingComplete: true,
+      language: stateStore.read().language || "en",
+      coreSetupComplete: true,
+      mcpRuntimeInstalled: config.mode === "full",
+      browserInteractionMode: config.browserInteractionMode,
+      experimentalBiggerContext: config.experimentalBiggerContext === true,
+      zeroRiskProEnabled: config.zeroRiskProEnabled === true,
+      webDefaultModel: config.webDefaultModel || "gpt-5.6-sol",
+      webDefaultEffort: config.webDefaultEffort || "high",
+    });
+  }
   if ((configuredInteractionMode === "automatic" || configuredInteractionMode === "manual")
     && stateStore.read().browserInteractionMode !== configuredInteractionMode) {
     stateStore.update({ browserInteractionMode: configuredInteractionMode });

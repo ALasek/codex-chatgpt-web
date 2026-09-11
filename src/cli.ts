@@ -65,6 +65,8 @@ Setup options:
                                Full mode: select, paste, and send in the launcher yourself
   --zero-risk-pro              Zero Risk: also install the explicit Pro-sized model row
   --zero-risk-default          Zero Risk: install only the default model row
+  --web-model MODEL           Automatic mode default: gpt-6-astra or gpt-5.6-sol
+  --web-effort EFFORT         Automatic mode default: low, medium, high, xhigh, or max
   --port NUMBER                Loopback Responses port (default: 17841)
   --chrome PATH                Google Chrome/Chromium executable used for account login
   --browser-host-descriptor PATH
@@ -310,6 +312,20 @@ async function setupCommand(args: string[]): Promise<void> {
     throw new Error("Choose at most one Zero Risk model profile: --zero-risk-pro or --zero-risk-default");
   }
   if (zeroRiskPro || zeroRiskDefault) options.zeroRiskProEnabled = zeroRiskPro;
+  const webModel = takeOption(args, "--web-model");
+  if (webModel !== undefined) {
+    if (webModel !== "gpt-5.6-sol" && webModel !== "gpt-6-astra") {
+      throw new Error("--web-model must be gpt-5.6-sol or gpt-6-astra");
+    }
+    options.webDefaultModel = webModel;
+  }
+  const webEffort = takeOption(args, "--web-effort");
+  if (webEffort !== undefined) {
+    if (!["low", "medium", "high", "xhigh", "max"].includes(webEffort)) {
+      throw new Error("--web-effort must be low, medium, high, xhigh, or max");
+    }
+    options.webDefaultEffort = webEffort as "low" | "medium" | "high" | "xhigh" | "max";
+  }
   options.replaceCodexRoute = takeFlag(args, "--replace-codex-route");
   options.restartService = takeFlag(args, "--restart-service");
   assertNoArgs(args);

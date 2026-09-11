@@ -2619,8 +2619,7 @@ test("effort menu waiting stops when ChatGPT reports an expired session", async 
   };
   const composerForm = { locator: () => effortControl };
   const composer = { locator: () => composerForm };
-  const effortChoice = { waitFor: async () => await neverVisible };
-  const effortChoices = { nth: () => effortChoice, count: async () => 3 };
+  const effortChoices = { nth: () => undefined, count: async () => 0 };
   const effortMenu = {
     last() { return this; },
     isVisible: async () => true,

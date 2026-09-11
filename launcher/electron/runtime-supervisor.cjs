@@ -197,6 +197,8 @@ function validateConfig(config, descriptorPath, platform = process.platform, lau
     throw new Error("Production launcher refuses a DEV harness configuration");
   }
   if (config.solAvailable === undefined) config = { ...config, solAvailable: true };
+  if (config.webDefaultModel === undefined) config = { ...config, webDefaultModel: "gpt-5.6-sol" };
+  if (config.webDefaultEffort === undefined) config = { ...config, webDefaultEffort: "high" };
   if (config.browserInteractionMode === undefined) {
     config.browserInteractionMode = "automatic";
   }
@@ -261,6 +263,12 @@ function validateConfig(config, descriptorPath, platform = process.platform, lau
   }
   if (config.proAvailable && !config.solAvailable) {
     throw new Error("Runtime configuration cannot enable Pro without Sol");
+  }
+  if (config.webDefaultModel !== "gpt-5.6-sol" && config.webDefaultModel !== "gpt-6-astra") {
+    throw new Error("Runtime configuration has an invalid Web default model");
+  }
+  if (!["low", "medium", "high", "xhigh", "max"].includes(config.webDefaultEffort)) {
+    throw new Error("Runtime configuration has an invalid Web default effort");
   }
   if (!Array.isArray(config.runtimeCommand)
     || config.runtimeCommand.length === 0

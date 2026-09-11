@@ -1551,7 +1551,7 @@ describe("ChatGPT outer-native harness v4", () => {
     ];
 
     const compiled = compileChatGptWebPrompt(request, browserOnlyCapabilities);
-    expect(compiled.text).toContain("ChatGPT Web Pro with no Codex Native bridge to the user's local computer");
+    expect(compiled.text).toContain("ChatGPT Web Sol · Max with no Codex Native bridge to the user's local computer");
     expect(compiled.text).toContain("web search, browsing, research");
     expect(compiled.text).toContain("prepared workspace evidence");
     expect(compiled.text).toContain('"system":["system-rule","repo-rule"]');

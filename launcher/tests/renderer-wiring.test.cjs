@@ -260,3 +260,17 @@ test("completed model setup remains a repeatable capability probe", () => {
     /!setupState\.coreSetupComplete[\s\S]*?smokePassedThisSession[\s\S]*?smokePassedForCurrentVersion\(setupState\)/,
   );
 });
+
+test("an installed runtime opens the browser instead of replaying setup", () => {
+  assert.match(appSource, /const interactionSetupComplete = snapshot\.state\.coreSetupComplete === true/);
+  assert.match(appSource, /interactionSetupComplete \? "browser" : "setup"/);
+  assert.match(appSource, /!surfaceChosenByUser\.current && surface === "setup" && interactionSetupComplete[\s\S]*?setSurface\("browser"\)/);
+  assert.match(electronMain, /configuredRuntimeAtLaunch\.configured[\s\S]*?onboardingComplete: true[\s\S]*?coreSetupComplete: true/);
+});
+
+test("the browser toolbar owns the compact Web model default for new tasks", () => {
+  assert.match(appSource, /<WebRoutePicker[\s\S]*?webDefaultEffort[\s\S]*?webDefaultModel/);
+  assert.match(appSource, /setWebRouteDefaults\(nextModel, nextEffort\)/);
+  assert.match(preloadSource, /setWebRouteDefaults:[\s\S]*?launcher:web-route-defaults/);
+  assert.match(electronMain, /launcher:web-route-defaults[\s\S]*?runtimeHost\.setWebRouteDefaults/);
+});

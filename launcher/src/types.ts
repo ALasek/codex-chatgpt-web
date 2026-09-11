@@ -1,6 +1,8 @@
 export type Language = "en" | "zh-CN" | "ja";
 export type LauncherProfile = "production" | "development";
 export type BrowserInteractionMode = "automatic" | "manual";
+export type WebModel = "gpt-5.6-sol" | "gpt-6-astra";
+export type WebEffort = "low" | "medium" | "high" | "xhigh" | "max";
 export type Surface = "browser" | "setup" | "mcp" | "activity" | "settings";
 
 export interface LauncherState {
@@ -13,6 +15,8 @@ export interface LauncherState {
   browserInteractionMode: BrowserInteractionMode;
   experimentalBiggerContext: boolean;
   zeroRiskProEnabled: boolean;
+  webDefaultModel: WebModel;
+  webDefaultEffort: WebEffort;
   sidebarOpen: boolean;
   sidebarWidth: number;
   browserSmokePassed?: boolean;
@@ -146,6 +150,8 @@ export interface LauncherApi {
   setAutostart(enabled: boolean): Promise<{ state: LauncherState; supported: boolean; enabled: boolean }>;
   setBiggerContext(enabled: boolean): Promise<LauncherState>;
   setZeroRiskPro(enabled: boolean): Promise<LauncherState>;
+  setWebRouteDefaults(model: WebModel, effort: WebEffort): Promise<LauncherState>;
+  clearWebTaskRoutes(): Promise<{ cleared: boolean }>;
   setBrowserInteractionMode(mode: BrowserInteractionMode): Promise<{
     state: LauncherState;
     credentialsRequired: boolean;

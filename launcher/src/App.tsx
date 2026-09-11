@@ -21,6 +21,8 @@ import type {
   LogRecord,
   OperationState,
   Surface,
+  WebEffort,
+  WebModel,
 } from "./types";
 
 const api = window.codexWebLauncher;
@@ -301,14 +303,13 @@ function LauncherShell({
   snapshot: LauncherSnapshot;
   updateState: (state: LauncherState) => void;
 }) {
-  const interactionSetupComplete = snapshot.state.coreSetupComplete === true
-    && (snapshot.state.browserInteractionMode === "manual"
-      || snapshot.state.codexCatalogVerified === true);
+  const interactionSetupComplete = snapshot.state.coreSetupComplete === true;
   const firstRunZeroRiskSetup = snapshot.state.browserInteractionMode === "manual"
     && snapshot.state.coreSetupComplete !== true;
   const [surface, setSurface] = useState<Surface>(
     firstRunZeroRiskSetup ? "mcp" : interactionSetupComplete ? "browser" : "setup",
   );
+  const surfaceChosenByUser = useRef(false);
   const devProfile = snapshot.profile === "development";
   const compactAtMount = useRef(window.matchMedia(COMPACT_SIDEBAR_QUERY).matches).current;
   const [sidebarOpen, setSidebarOpen] = useState(!compactAtMount);
@@ -334,6 +335,12 @@ function LauncherShell({
     && snapshot.state.codexCatalogVerified === true
     && snapshot.state.mcpSetupComplete !== true;
   const selectedManualTab = browser?.tabs.find(tab => tab.active && tab.interactionMode === "manual");
+
+  useEffect(() => {
+    if (!surfaceChosenByUser.current && surface === "setup" && interactionSetupComplete) {
+      setSurface("browser");
+    }
+  }, [interactionSetupComplete, surface]);
 
   useEffect(() => {
     if (snapshot.state.browserInteractionMode === "manual") {
@@ -430,6 +437,7 @@ function LauncherShell({
   };
 
   const navigateSurface = (next: Surface) => {
+    surfaceChosenByUser.current = true;
     setSurface(next);
     if (compactSidebar) setSidebarOpen(false);
   };
@@ -591,6 +599,8 @@ function LauncherShell({
                 operation={operation}
                 platform={snapshot.platform}
                 setError={setError}
+                snapshot={snapshot}
+                updateState={updateState}
               />
             ) : null}
             {surface === "setup" ? (
@@ -748,6 +758,8 @@ function BrowserSurface({
   operation,
   platform,
   setError,
+  snapshot,
+  updateState,
 }: {
   browser: BrowserState | null;
   browserSlotRef: (node: HTMLDivElement | null) => void;
@@ -756,6 +768,8 @@ function BrowserSurface({
   operation: OperationState | null;
   platform: string;
   setError: (error: string | null) => void;
+  snapshot: LauncherSnapshot;
+  updateState: (state: LauncherState) => void;
 }) {
   const [passkeyContinuationRequested, setPasskeyContinuationRequested] = useState(false);
   const visible = browser?.visible === true;
@@ -888,6 +902,14 @@ function BrowserSurface({
           />
           <IconButton disabled={navigationLocked || !visible} icon="reload" label={copy.reload} onClick={() => void navigate("reload")} />
         </div>
+        <WebRoutePicker
+          copy={copy}
+          disabled={manualInteraction || navigationLocked || operation?.status === "running"}
+          effort={snapshot.state.webDefaultEffort}
+          model={snapshot.state.webDefaultModel}
+          setError={setError}
+          updateState={updateState}
+        />
         <div className="browser-address" title={browser?.url || copy.browserAddress}>
           <Icon name="globe" />
           <span>{formatBrowserAddress(browser?.url, copy)}</span>
@@ -967,6 +989,63 @@ function BrowserSurface({
         )}
       </div>
     </section>
+  );
+}
+
+function WebRoutePicker({
+  copy,
+  disabled,
+  effort,
+  model,
+  setError,
+  updateState,
+}: {
+  copy: Copy;
+  disabled: boolean;
+  effort: WebEffort;
+  model: WebModel;
+  setError: (error: string | null) => void;
+  updateState: (state: LauncherState) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const update = async (nextModel: WebModel, nextEffort: WebEffort) => {
+    if (busy || (nextModel === model && nextEffort === effort)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      updateState(await api!.setWebRouteDefaults(nextModel, nextEffort));
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="web-route-picker" title={copy.webRouteHint}>
+      <span>{copy.webRouteNewTasks}</span>
+      <select
+        aria-label={copy.webRouteModel}
+        disabled={disabled || busy}
+        onChange={(event) => void update(event.target.value as WebModel, effort)}
+        value={model}
+      >
+        <option value="gpt-6-astra">Astra</option>
+        <option value="gpt-5.6-sol">Sol</option>
+      </select>
+      <select
+        aria-label={copy.webRouteEffort}
+        disabled={disabled || busy}
+        onChange={(event) => void update(model, event.target.value as WebEffort)}
+        value={effort}
+      >
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+        <option value="xhigh">Extra High</option>
+        <option value="max">Max</option>
+      </select>
+      {busy ? <i className="tab-spinner" /> : null}
+    </div>
   );
 }
 
