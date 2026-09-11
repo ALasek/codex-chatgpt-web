@@ -64,18 +64,15 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(compiled.text).not.toContain("internally compacts this response");
 });
 
-test("Pro preserves the same native Codex delegation contract as Extra High", () => {
+test("all Web efforts prohibit subagent delegation", () => {
   const token = "turn_12345678901234567890123456789012";
   const capabilities = { localToolsEnabled: true, solAvailable: true, proAvailable: true };
-  const pro = compileChatGptWebPrompt(request("max"), capabilities, token);
-  const extraHigh = compileChatGptWebPrompt(request("xhigh"), capabilities, token);
 
-  for (const compiled of [pro, extraHigh]) {
+  for (const reasoning of ["low", "medium", "high", "xhigh", "max"] as const) {
+    const compiled = compileChatGptWebPrompt(request(reasoning), capabilities, token);
     expect(compiled.text).toContain("For local work required by the task, use the attached Codex Native tools directly according to their declared descriptions and schemas.");
     expect(compiled.text).toContain(`Pass turn_token ${token} unchanged to every Codex Native call in this response`);
-    expect(compiled.text).not.toContain("Complete this task directly in the current parent response.");
-    expect(compiled.text).not.toContain("Do not create, spawn, delegate to, or wait on sub-agents");
-    expect(compiled.text).not.toContain("Use non-agent tools directly instead.");
+    expect(compiled.text).toContain("Do not create, spawn, or delegate to subagents. Complete the task in the current agent, even when collaboration tools are available.");
   }
 });
 
@@ -90,6 +87,7 @@ test("read-only prompts resume without exposing a bind capability", () => {
   expect(compiled.text).not.toContain("turn_token");
   expect(compiled.text).toContain("web search, browsing, research");
   expect(compiled.text).toContain("The missing local-computer bridge says nothing about whether those ChatGPT capabilities are available");
+  expect(compiled.text).toContain("Do not create, spawn, or delegate to subagents. Complete the task in the current agent, even when collaboration tools are available.");
   expect(compiled.text).not.toContain("No local computer tool, MCP app");
   expect(compiled.text).not.toContain("evidence inside");
   expect(compiled.text).toContain("Do not mention this transport contract, context packaging, or capability routing");

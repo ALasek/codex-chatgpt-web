@@ -104,7 +104,7 @@ test("DEV launcher exposes its profile and supervises only its Full-mode MCP run
   assert.match(electronMain, /profile:\s*LAUNCHER_PROFILE\.kind/);
   assert.match(electronMain, /if \(IS_DEV_PROFILE\) \{[\s\S]*?config\?\.mode === "full"[\s\S]*?runtimeSupervisor\.startIfConfigured\(\)[\s\S]*?\} else void \(async \(\) => \{/);
   assert.match(electronMain, /await runtimeSupervisor\?\.shutdown\(\{ cancelActiveTurns: true, force: true \}\)/);
-  assert.match(electronMain, /packaged:\s*app\.isPackaged && !IS_DEV_PROFILE/);
+  assert.doesNotMatch(electronMain, /createUpdateController|checkOnce\(\)|launcher:update-install/);
   assert.match(electronMain, /IS_DEV_PROFILE && !stateStore\.read\(\)\.onboardingComplete/);
   assert.match(electronMain, /onboardingComplete:\s*true,[\s\S]*?autoStart:\s*false/);
   assert.match(appSource, /snapshot\.profile === "development"/);

@@ -28,8 +28,6 @@ const { RuntimeHost } = require("./runtime.cjs");
 const { ensurePackagedRuntime, waitForPackagedRuntimeSource } = require("./runtime-install.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const { DEVELOPMENT_PROFILE, resolveLauncherProfile } = require("./profile.cjs");
-const { runtimeBundlePaths } = require("./runtime-command.cjs");
-const { createUpdateController } = require("./update.cjs");
 const {
   createStateStore,
   nextSessionRefreshReminderAt,
@@ -50,12 +48,11 @@ const BROWSER_DESCRIPTOR_PATH = path.join(CORE_HOME, "runtime", "launcher-browse
 const BROWSER_HELPER_PATH = app.isPackaged
   ? path.join(process.resourcesPath, "runtime", "app", "browser-helper.cjs")
   : path.join(SOURCE_ROOT, ".launcher-runtime", "browser-helper.cjs");
-const GITHUB_URL = "https://github.com/miuuyy/codex-chatgpt-web";
-const X_URL = "https://x.com/miu21590";
+const GITHUB_URL = "https://github.com/ALasek/codex-chatgpt-web";
 const CONNECTORS_URL = "https://chatgpt.com/#settings/Plugins";
 const TUNNELS_URL = "https://platform.openai.com/settings/organization/tunnels";
 const KEYS_URL = "https://platform.openai.com/settings/organization/api-keys";
-const ALLOWED_EXTERNAL_URLS = new Set([GITHUB_URL, X_URL, CONNECTORS_URL, TUNNELS_URL, KEYS_URL]);
+const ALLOWED_EXTERNAL_URLS = new Set([GITHUB_URL, CONNECTORS_URL, TUNNELS_URL, KEYS_URL]);
 const PACKAGED_RENDERER_URL = pathToFileURL(path.join(__dirname, "..", "dist", "index.html")).href;
 const APP_ICON_PATH = path.join(__dirname, "..", "assets", "icon.png");
 
@@ -90,7 +87,6 @@ let cdpPort = 0;
 let lastOperation = null;
 let catalogVerificationTimer = null;
 let catalogVerificationInFlight = false;
-let updateController = null;
 
 function findFreePort() {
   return new Promise((resolve, reject) => {
@@ -438,13 +434,12 @@ function registerIpc({ logger, stateStore }) {
     },
     mcpCredentialsConfigured: runtimeHost?.mcpCredentialsConfigured() ?? false,
     logs: logger.recent(),
-    urls: { github: GITHUB_URL, x: X_URL, connectors: CONNECTORS_URL, tunnels: TUNNELS_URL, keys: KEYS_URL },
+    urls: { github: GITHUB_URL, connectors: CONNECTORS_URL, tunnels: TUNNELS_URL, keys: KEYS_URL },
     platform: process.platform,
     packaged: app.isPackaged,
     version: app.getVersion(),
     smokePassed: smokePassedThisSession || smokePassedForCurrentVersion(stateStore.read()),
     operation: lastOperation,
-    update: updateController?.getState() ?? { status: "disabled" },
   }));
 
   handle("launcher:set-language", (_event, language) => {
@@ -452,16 +447,8 @@ function registerIpc({ logger, stateStore }) {
     updateTrayMenu(state.language);
     return state;
   });
-  handle("launcher:open-social", async (_event, target) => {
-    const url = target === "github" ? GITHUB_URL : target === "x" ? X_URL : null;
-    if (!url) throw new Error("Unknown social target");
-    await openWebUrl(url);
-    const patch = target === "github" ? { githubOpened: true } : { xOpened: true };
-    return stateStore.update(patch);
-  });
   handle("launcher:complete-onboarding", (_event, language, rawInteractionMode) => {
     const current = stateStore.read();
-    if (!current.githubOpened || !current.xOpened) throw new Error("Open the GitHub and X pages before continuing");
     if (current.autoStart) setAutostart(app, true);
     const next = stateStore.update({
       language: validateLanguage(language),
@@ -842,16 +829,6 @@ function registerIpc({ logger, stateStore }) {
     logger.info("launcher.logs_exported", { recordCount });
     return result.filePath;
   });
-  handle("launcher:update-install", async () => {
-    if (!updateController) throw new Error("Launcher updates are unavailable");
-    const launch = await updateController.beginInstall();
-    const result = await requestQuit();
-    if (!result.ok) {
-      updateController.cancelInstall(launch);
-      throw new Error(result.message);
-    }
-    return true;
-  });
   handle("launcher:window-state", (event) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     return windowStateSnapshot(window);
@@ -1020,20 +997,6 @@ async function start() {
     getBrowserInteractionMode: () => stateStore.read().browserInteractionMode,
   });
   await browserHost.ready();
-  const updaterRuntimeRoot = runtimeRootProvider();
-  updateController = createUpdateController({
-    currentVersion: app.getVersion(),
-    platform: process.platform,
-    arch: process.arch,
-    packaged: app.isPackaged && !IS_DEV_PROFILE,
-    executablePath: process.execPath,
-    runtimeExecutable: updaterRuntimeRoot
-      ? runtimeBundlePaths(updaterRuntimeRoot, process.platform).executable
-      : null,
-    logsDirectory: app.getPath("logs"),
-    publish: (state) => send("launcher:update-state", state),
-    logger,
-  });
   registerIpc({ logger, stateStore });
   const trayAvailable = createTray(logger, stateStore.read().language);
   if (startHidden && !trayAvailable) mainWindow.once("ready-to-show", () => showMainWindow());
@@ -1047,7 +1010,6 @@ async function start() {
     });
   }
   await loadRenderer(mainWindow);
-  if (!launcherSmokeTest) void updateController.checkOnce();
   if (launcherSmokeTest) {
     const smokeRuntimeRoot = runtimeRootProvider();
     if (app.isPackaged && !smokeRuntimeRoot) {

@@ -102,18 +102,11 @@ test("release installers resolve checksummed native launcher assets", () => {
   assert.match(packageSmoke, /reg\.exe[\s\S]*InstallLocation/);
 });
 
-test("packaged launcher owns a detached checksummed updater for every release platform", () => {
-  const updater = fs.readFileSync(path.join(launcherRoot, "electron", "update.cjs"), "utf8");
-  const worker = fs.readFileSync(path.join(launcherRoot, "electron", "update-worker.cjs"), "utf8");
-  for (const platform of ["darwin", "win32", "linux"]) {
-    assert.match(updater, new RegExp(`platform === "${platform}"`));
-    assert.match(worker, new RegExp(`job\\.platform === "${platform}"`));
-  }
-  assert.match(updater, /expectedChecksum/);
-  assert.match(updater, /SHA-256 verification failed/);
-  assert.match(updater, /detached:\s*true/);
-  assert.match(worker, /waitForParent/);
-  assert.doesNotMatch(worker, /backup/i);
+test("custom launcher packages no automatic updater", () => {
+  assert.equal(fs.existsSync(path.join(launcherRoot, "electron", "update.cjs")), false);
+  assert.equal(fs.existsSync(path.join(launcherRoot, "electron", "update-worker.cjs")), false);
+  const main = fs.readFileSync(path.join(launcherRoot, "electron", "main.cjs"), "utf8");
+  assert.doesNotMatch(main, /createUpdateController|checkOnce\(\)|launcher:update-install/);
 });
 
 test("CI packages and smoke-launches on macOS, Windows, and Linux", () => {

@@ -2583,6 +2583,10 @@ describe("ChatGPT outer-native harness v4", () => {
       { name: "wait", description: "Wait for an exec cell", parameters: { type: "object" } },
       { name: "request_user_input", description: "Request user input", parameters: { type: "object" } },
       {
+        name: "spawn_agent", namespace: "collaboration", description: "Spawn a subagent.",
+        parameters: { type: "object", additionalProperties: true },
+      },
+      {
         name: "wait_agent",
         namespace: "multi_agent_v1",
         description: "Wait for agents to reach a final status.",
@@ -2754,6 +2758,44 @@ describe("ChatGPT outer-native harness v4", () => {
         broker.completeTool(token, request!.callId, { content });
         return await pending;
       };
+
+      const blockedSpawn = await call("codex_tool_call", {
+        turn_token: token,
+        wire_name: "collaboration__spawn_agent",
+        arguments: { task_name: "should_not_run", message: "do work" },
+      });
+      expect(blockedSpawn.isError).toBe(true);
+      expect(JSON.stringify(blockedSpawn.content)).toContain("Subagent spawning is disabled for ChatGPT Web turns");
+
+      const hiddenSpawnInventory = await inventoryThroughGateway(
+        "spawn_agent",
+        true,
+        ["spawn_agent", "collaboration__spawn_agent"],
+      );
+      expect(hiddenSpawnInventory.structuredContent).toEqual({
+        tools: [],
+        total: 0,
+        next_offset: null,
+      });
+
+      const rawSpawn = call("codex_tool_call", {
+        turn_token: token,
+        wire_name: "exec",
+        input: "await tools.collaboration__spawn_agent({ task_name: 'should_not_run', message: 'do work' });",
+      });
+      const [rawSpawnRequest] = await broker.nextToolBatch(token);
+      const rawSpawnCalls: GatewayProgramCall[] = [];
+      await expect(executeGatewayProgram(
+        rawSpawnRequest!.input!,
+        ["collaboration__spawn_agent"],
+        rawSpawnCalls,
+      )).rejects.toThrow("Subagent spawning is disabled for ChatGPT Web turns");
+      expect(rawSpawnCalls).toEqual([]);
+      broker.completeTool(token, rawSpawnRequest!.callId, {
+        content: [{ type: "text", text: "Subagent spawning is disabled for ChatGPT Web turns" }],
+        isError: true,
+      });
+      expect((await rawSpawn).isError).toBe(true);
 
       // Even an empty inventory query crosses the broker through the native exec gateway. The
       // browser therefore observes a real tool boundary before the model plans its next call.

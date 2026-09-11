@@ -9,7 +9,6 @@ function subscription(channel, listener) {
 contextBridge.exposeInMainWorld("codexWebLauncher", {
   snapshot: () => ipcRenderer.invoke("launcher:snapshot"),
   setLanguage: (language) => ipcRenderer.invoke("launcher:set-language", language),
-  openSocial: (target) => ipcRenderer.invoke("launcher:open-social", target),
   completeOnboarding: (language, browserInteractionMode) => ipcRenderer.invoke(
     "launcher:complete-onboarding",
     language,
@@ -47,7 +46,6 @@ contextBridge.exposeInMainWorld("codexWebLauncher", {
   setSidebarState: (state) => ipcRenderer.invoke("launcher:sidebar-state", state),
   logs: (limit) => ipcRenderer.invoke("launcher:logs", limit),
   exportLogs: () => ipcRenderer.invoke("launcher:export-logs"),
-  installUpdate: () => ipcRenderer.invoke("launcher:update-install"),
   windowState: () => ipcRenderer.invoke("launcher:window-state"),
   windowControl: (action) => ipcRenderer.send("launcher:window-control", action),
   onWindowStateChanged: (listener) => subscription("launcher:window-state-changed", listener),
@@ -55,5 +53,4 @@ contextBridge.exposeInMainWorld("codexWebLauncher", {
   onBrowserState: (listener) => subscription("launcher:browser-state", listener),
   onOperation: (listener) => subscription("launcher:operation", listener),
   onLog: (listener) => subscription("launcher:log", listener),
-  onUpdateState: (listener) => subscription("launcher:update-state", listener),
 });

@@ -122,12 +122,17 @@ function gatewayToolNameIsValid(name: string): boolean {
   return /^[A-Za-z0-9_$]+$/.test(name);
 }
 
+function isSubagentSpawnToolName(name: string): boolean {
+  return name === "spawn_agent" || name.endsWith("__spawn_agent");
+}
+
 function safeVisibleTools(environment: ChatGptTurnEnvironment, contract: ChatGptMcpContract): CodexTool[] {
-  if (contract === "native") return environment.tools;
-  const bridgeNamespaces = new Set(environment.tools
+  const visibleTools = environment.tools.filter(tool => !isSubagentSpawnToolName(wireName(tool)));
+  if (contract === "native") return visibleTools;
+  const bridgeNamespaces = new Set(visibleTools
     .filter(tool => tool.namespace && BRIDGE_TOOL_NAMES.has(tool.name))
     .map(tool => tool.namespace!));
-  return environment.tools.filter(tool => (
+  return visibleTools.filter(tool => (
     wireName(tool) !== CODEX_COMPACTION_CONTROL_WIRE_NAME
     && !BRIDGE_TOOL_NAMES.has(tool.name)
     // Zero Risk does not expose model-authored JavaScript. Automatic Full mode keeps the native
@@ -263,7 +268,7 @@ function gatewayToolCatalogProgram(options: {
     `const excludedNames = new Set(${JSON.stringify(options.excludedNames)});`,
     `const needle = ${JSON.stringify(needle)};`,
     "const visibleName = name => {",
-    "  return typeof name === \"string\" && /^[A-Za-z0-9_$]+$/.test(name) && !excludedNames.has(name);",
+    "  return typeof name === \"string\" && /^[A-Za-z0-9_$]+$/.test(name) && !excludedNames.has(name) && name !== \"spawn_agent\" && !name.endsWith(\"__spawn_agent\");",
     "};",
     "const matches = ALL_TOOLS",
     "  .filter(tool => visibleName(tool?.name))",
@@ -311,6 +316,7 @@ function gatewayToolCatalogPage(response: {
     if (typeof tool.name !== "string"
       || typeof tool.description !== "string"
       || !gatewayToolNameIsValid(tool.name)
+      || isSubagentSpawnToolName(tool.name)
       || excludedNames.has(tool.name)) {
       throw new Error("Native nested tool inventory returned an invalid tool descriptor");
     }
@@ -345,7 +351,9 @@ function execGatewayProgram(
   payload: { arguments?: Record<string, unknown>; input?: string },
   excludedNames: string[],
 ): string {
-  if (!gatewayToolNameIsValid(nestedToolName) || excludedNames.includes(nestedToolName)) {
+  if (!gatewayToolNameIsValid(nestedToolName)
+    || isSubagentSpawnToolName(nestedToolName)
+    || excludedNames.includes(nestedToolName)) {
     throw new Error(`Codex nested tool is not available in this turn: ${nestedToolName}`);
   }
   const gatewayName = gatewayNestedToolName(nestedToolName);
@@ -378,14 +386,17 @@ function transportBoundRawExecProgram(input: string, blockedExecName: string): s
     "  const source = tools;",
     `  const waitNames = new Set(${JSON.stringify([...GATEWAY_AGENT_WAIT_TOOL_NAMES])});`,
     `  const blockedExecName = ${JSON.stringify(blockedExecName)};`,
+    "  const blockedSpawnName = name => typeof name === \"string\" && (name === \"spawn_agent\" || name.endsWith(\"__spawn_agent\"));",
     `  const pollMs = ${CHATGPT_WEB_AGENT_WAIT_POLL_MS};`,
     "  const registryNames = new Set(Reflect.ownKeys(source));",
     "  if (typeof ALL_TOOLS !== \"undefined\" && Array.isArray(ALL_TOOLS)) {",
-    "    for (const tool of ALL_TOOLS) if (typeof tool?.name === \"string\") registryNames.add(tool.name);",
+    "    for (const tool of ALL_TOOLS) if (typeof tool?.name === \"string\" && !blockedSpawnName(tool.name)) registryNames.add(tool.name);",
     "  }",
+    "  for (const name of registryNames) if (blockedSpawnName(name)) registryNames.delete(name);",
     "  const wrappers = new Map();",
     "  const expose = name => {",
     "    if (wrappers.has(name)) return wrappers.get(name);",
+    "    if (blockedSpawnName(name)) return () => { throw new Error(\"Subagent spawning is disabled for ChatGPT Web turns\"); };",
     "    const value = Reflect.get(source, name, source);",
     "    let exposed = value;",
     "    if (typeof value === \"function\" && name === blockedExecName) {",
@@ -405,10 +416,10 @@ function transportBoundRawExecProgram(input: string, blockedExecName: string): s
     "  };",
     "  return new Proxy(Object.create(null), {",
     "    get: (_target, name) => expose(name),",
-    "    has: (_target, name) => registryNames.has(name) || Reflect.has(source, name),",
+    "    has: (_target, name) => !blockedSpawnName(name) && (registryNames.has(name) || Reflect.has(source, name)),",
     "    ownKeys: () => [...registryNames],",
     "    getOwnPropertyDescriptor: (_target, name) =>",
-    "      registryNames.has(name) || Reflect.has(source, name)",
+    "      !blockedSpawnName(name) && (registryNames.has(name) || Reflect.has(source, name))",
     "        ? { configurable: true, enumerable: true, writable: false, value: expose(name) }",
     "        : undefined,",
     "    set: () => false,",
@@ -867,6 +878,9 @@ export async function runChatGptMcpServer(options: {
       }
       return withClaimedTurn("codex_tool_call", requestId, extra, async claimed => {
         const bound = claimed.environment;
+        if (isSubagentSpawnToolName(wire_name)) {
+          throw new Error("Subagent spawning is disabled for ChatGPT Web turns");
+        }
         const tool = safeVisibleTools(bound, contract)
           .find(candidate => wireName(candidate) === wire_name);
         if (!tool) {

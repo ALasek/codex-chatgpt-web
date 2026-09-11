@@ -7,8 +7,6 @@ export interface LauncherState {
   version: 1;
   language: Language | null;
   onboardingComplete: boolean;
-  githubOpened: boolean;
-  xOpened: boolean;
   autoStart: boolean;
   keepRunningOnClose: boolean;
   showBrowserDuringTurns: boolean;
@@ -86,11 +84,6 @@ export interface OperationState {
   message: string;
 }
 
-export type UpdateState =
-  | { status: "disabled" | "idle" | "checking" | "up-to-date" }
-  | { status: "available" | "downloading" | "installing"; version: string }
-  | { status: "error"; message: string };
-
 export interface LauncherSnapshot {
   profile: LauncherProfile;
   profilePaths: {
@@ -106,7 +99,6 @@ export interface LauncherSnapshot {
   logs: LogRecord[];
   urls: {
     github: string;
-    x: string;
     connectors: string;
     tunnels: string;
     keys: string;
@@ -116,13 +108,11 @@ export interface LauncherSnapshot {
   version: string;
   smokePassed: boolean;
   operation: OperationState | null;
-  update: UpdateState;
 }
 
 export interface LauncherApi {
   snapshot(): Promise<LauncherSnapshot>;
   setLanguage(language: Language): Promise<LauncherState>;
-  openSocial(target: "github" | "x"): Promise<LauncherState>;
   completeOnboarding(language: Language, browserInteractionMode: BrowserInteractionMode): Promise<LauncherState>;
   openExternal(url: string): Promise<boolean>;
   setBrowserBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<boolean>;
@@ -168,7 +158,6 @@ export interface LauncherApi {
   setSidebarState(state: { open: boolean; width: number }): Promise<LauncherState>;
   logs(limit?: number): Promise<LogRecord[]>;
   exportLogs(): Promise<string | null>;
-  installUpdate(): Promise<boolean>;
   windowState(): Promise<{ fullScreen: boolean; maximized: boolean }>;
   windowControl(action: "close" | "minimize" | "zoom"): void;
   onWindowStateChanged(listener: (state: { fullScreen: boolean; maximized: boolean }) => void): () => void;
@@ -176,7 +165,6 @@ export interface LauncherApi {
   onBrowserState(listener: (state: BrowserState) => void): () => void;
   onOperation(listener: (state: OperationState) => void): () => void;
   onLog(listener: (record: LogRecord) => void): () => void;
-  onUpdateState(listener: (state: UpdateState) => void): () => void;
 }
 
 declare global {
