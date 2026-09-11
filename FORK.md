@@ -5,6 +5,7 @@ This fork intentionally differs from upstream in three ways:
 - ChatGPT Web turns cannot spawn subagents. The bridge prompt forbids delegation, and the MCP boundary hides and rejects `spawn_agent`, including calls attempted through raw `exec`.
 - The launcher has no automatic updater. Updates are reviewed and merged from `upstream/main`, then built manually.
 - Onboarding ends after language and interaction-mode selection. It never asks users to star a repository or open a social profile.
+- The Codex route lives only as long as the launcher's daemon. Native Codex models never depend on the bridge while it is not running: the launcher disconnects the route on quit, on Windows session end, and when daemon recovery gives up, and the daemon disconnects it itself when the launcher process disappears.
 
 ## Manual upstream update
 

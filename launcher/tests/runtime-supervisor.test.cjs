@@ -1960,3 +1960,45 @@ server.listen(config.port, config.host);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("supervisor reports a daemon that exhausted automatic restarts so the launcher can restore the native Codex route", () => {
+  const failures = [];
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: os.tmpdir(),
+    coreHome: os.tmpdir(),
+    browserDescriptorPath: path.join(os.tmpdir(), "launcher.json"),
+    onRuntimeFailed: (failure) => failures.push(failure),
+  });
+  supervisor.tryWriteState = () => true;
+  supervisor.restartHistory.daemon = Array.from({ length: MAX_RESTARTS_PER_WINDOW }, () => Date.now());
+  supervisor.lastChildFailure.daemon = "daemon exited (1)";
+
+  supervisor.scheduleRecovery("daemon");
+
+  assert.equal(supervisor.restartTimers.daemon, null);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].name, "daemon");
+  assert.match(failures[0].message, /automatic restart is disabled; last failure: daemon exited \(1\)/);
+});
+
+test("supervisor stays silent about a daemon that is still scheduled for automatic recovery", () => {
+  const failures = [];
+  const supervisor = new RuntimeSupervisor({
+    app: { getVersion: () => "0.2.0", isPackaged: false },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: os.tmpdir(),
+    coreHome: os.tmpdir(),
+    browserDescriptorPath: path.join(os.tmpdir(), "launcher.json"),
+    onRuntimeFailed: (failure) => failures.push(failure),
+  });
+  supervisor.tryWriteState = () => true;
+  supervisor.recover = async () => {};
+
+  supervisor.scheduleRecovery("daemon");
+
+  assert.notEqual(supervisor.restartTimers.daemon, null);
+  clearTimeout(supervisor.restartTimers.daemon);
+  assert.deepEqual(failures, []);
+});

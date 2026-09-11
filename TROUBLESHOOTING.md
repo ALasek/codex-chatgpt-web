@@ -142,6 +142,23 @@ Do not assume that a generic 502 means the Tunnel is broken. Since v4.0.7, a nat
 outlives its turn binding is reported explicitly as `codex_tool_timeout` and retired rather than
 being presented as an ambiguous proxy success.
 
+### Every Codex turn hangs on `Reconnecting`, including native models
+
+Codex is still pointed at the launcher's Responses proxy, but nothing is listening on that port.
+The route is only meant to be connected while the launcher runs its daemon: the launcher hands
+Codex back to its native route when it quits, when Windows ends the session, and when the daemon
+cannot be restarted, and the daemon itself restores the native route if the launcher process dies
+underneath it. If Codex still hangs, restore the route by hand and restart Codex:
+
+```powershell
+& "$env:USERPROFILE\.codex-chatgpt-webersions\<version>untimeun.exe" `
+  "$env:USERPROFILE\.codex-chatgpt-webersions\<version>pp\cli.js" route disconnect
+```
+
+`route status` reports `active: false` afterwards, and `doctor` shows whether the proxy is
+reachable. Start the launcher again to reconnect the route; Web models return to the model picker
+after one more Codex restart.
+
 ## Native compaction returns `404 Not Found`
 
 For an ordinary Codex model, `/v1/responses/compact` forwards to the native legacy compact

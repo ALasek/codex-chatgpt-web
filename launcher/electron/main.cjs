@@ -86,6 +86,7 @@ let smokePassedThisSession = false;
 let cdpPort = 0;
 let lastOperation = null;
 let catalogVerificationTimer = null;
+let launcherLogger = null;
 let catalogVerificationInFlight = false;
 
 function findFreePort() {
@@ -842,6 +843,20 @@ function registerIpc({ logger, stateStore }) {
   });
 }
 
+// Codex only talks to this launcher's daemon while the route is connected, so a quit must hand
+// Codex back to its native route or every later Codex turn hangs on a closed port.
+async function restoreCodexRouteOnQuit() {
+  if (IS_DEV_PROFILE || !runtimeHost) return;
+  try {
+    const route = await runtimeHost.restoreBridgeRoute("launcher-quit");
+    if (route.changed === true) launcherLogger?.info("bridge.route_restored_on_quit");
+  } catch (error) {
+    launcherLogger?.warn("bridge.route_restore_on_quit_failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function requestQuit() {
   if (shutdownInProgress || exitCommitted) {
     return { ok: false, message: "Launcher shutdown is already in progress" };
@@ -853,6 +868,7 @@ async function requestQuit() {
       throw new Error(`Wait for ${activeOperation} to finish before quitting Codex Web GPT`);
     }
     await runtimeSupervisor?.shutdown({ cancelActiveTurns: true, force: true });
+    await restoreCodexRouteOnQuit();
     stopCatalogVerificationMonitor();
     quitting = true;
     await browserHost?.persistSession();
@@ -937,6 +953,7 @@ async function start() {
     filePath: path.join(app.getPath("logs"), "launcher.jsonl"),
     publish: (record) => send("launcher:log", record),
   });
+  launcherLogger = logger;
   const startHidden = process.argv.includes("--hidden") && stateStore.read().onboardingComplete;
   nativeTheme.themeSource = "system";
   mainWindow = createWindow({
@@ -960,6 +977,11 @@ async function start() {
     browserDescriptorPath: BROWSER_DESCRIPTOR_PATH,
     launcherProfile: LAUNCHER_PROFILE.kind,
     publishOperation,
+    onRuntimeFailed: ({ name, message }) => {
+      if (name !== "daemon" || IS_DEV_PROFILE) return;
+      logger.warn("bridge.route_restore_after_daemon_failure", { message });
+      void restoreCodexRouteAfterRuntimeFailure({ logger, stateStore });
+    },
   });
   runtimeHost = new RuntimeHost({
     app,
@@ -1211,6 +1233,8 @@ async function start() {
     event.preventDefault();
     void requestQuit();
   });
+  // Windows logoff and shutdown end the session without before-quit.
+  app.on("session-end", () => { void requestQuit(); });
   process.once("SIGINT", () => { void requestQuit(); });
   process.once("SIGTERM", () => { void requestQuit(); });
 }

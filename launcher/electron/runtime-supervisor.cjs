@@ -322,6 +322,7 @@ class RuntimeSupervisor {
     browserDescriptorPath,
     launcherProfile = "production",
     publishOperation,
+    onRuntimeFailed,
     runtimeInvocationFactory = runtimeInvocation,
   }) {
     this.app = app;
@@ -336,6 +337,7 @@ class RuntimeSupervisor {
     }
     this.launcherProfile = launcherProfile;
     this.publishOperation = publishOperation;
+    this.onRuntimeFailed = onRuntimeFailed;
     this.runtimeInvocationFactory = runtimeInvocationFactory;
     this.configPath = path.join(coreHome, "config.json");
     this.statePath = path.join(coreHome, "runtime", "launcher-supervisor.json");
@@ -523,6 +525,7 @@ class RuntimeSupervisor {
         error ? { message: error.message } : { code, signal },
       );
       if (!expected && restartable && statePersisted) this.scheduleRecovery(name);
+      else if (!expected) this.onRuntimeFailed?.({ name, message: detail });
     };
     child.once("error", (error) => {
       if (!Number.isInteger(child.pid)) {
@@ -1301,6 +1304,7 @@ class RuntimeSupervisor {
         + (cause ? `; last failure: ${cause}` : "");
       this.tryWriteState("failed", message);
       this.publishOperation?.({ name: "runtime-recovery", status: "failed", message });
+      this.onRuntimeFailed?.({ name, message });
       return;
     }
     const delay = Math.min(attempts * 1_000, 5_000);

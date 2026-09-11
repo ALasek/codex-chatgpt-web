@@ -24,6 +24,7 @@ import { formatDoctorReport, runDoctor } from "./doctor";
 import { runChatGptMcpMain } from "./adapters/chatgpt-web/mcp-main";
 import { runCommand } from "./process";
 import { startServer } from "./server";
+import { launcherOwnerPid, watchLauncherOwner } from "./launcher-owner-watch";
 import { assertServiceIdle, cancelActiveTurns, getServiceStatus, installService, interruptActiveTurn, restartService, startService, stopService, uninstallService } from "./service";
 import { existingFullSetupCredentials, preflightSetup, setup, type SetupOptions } from "./setup";
 import { installRuntimeKeyBytes, managedRuntimeKeyPath, stopTunnel, tunnelStatus, waitForTunnelReady } from "./tunnel";
@@ -365,6 +366,22 @@ async function doctorCommand(args: string[]): Promise<void> {
   if (!report.ok) process.exitCode = 1;
 }
 
+function releaseRouteForDeadLauncher(ownerPid: number): void {
+  let detail: string;
+  try {
+    detail = deactivateCodexIntegration().changed
+      ? "restored the native Codex route"
+      : "the native Codex route was already active";
+  } catch (error) {
+    process.exitCode = 1;
+    detail = `restoring the native Codex route failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  process.stderr.write(`codex-chatgpt-web: launcher owner (pid ${ownerPid}) exited; ${detail}; stopping the Responses proxy
+`);
+  process.emit("SIGTERM");
+  setTimeout(() => process.exit(process.exitCode ?? 0), 5_000).unref();
+}
+
 async function routeCommand(args: string[]): Promise<void> {
   const action = args.shift() ?? "status";
   assertNoArgs(args);
@@ -580,6 +597,13 @@ async function main(): Promise<void> {
     const config = loadConfig();
     const server = startServer(config);
     stdout.write(`codex-chatgpt-web ${VERSION} listening on http://${config.host}:${server.port}/v1 (${config.mode})\n`);
+    const ownerPid = launcherOwnerPid(config);
+    if (ownerPid !== undefined) {
+      watchLauncherOwner({
+        ownerPid,
+        onOwnerGone: () => releaseRouteForDeadLauncher(ownerPid),
+      });
+    }
     await new Promise<void>(() => {});
   } else if (command === "dev") await runDevCommand(args);
   else if (command === "mcp") await runChatGptMcpMain(args);
