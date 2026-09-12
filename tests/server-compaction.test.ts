@@ -3,8 +3,8 @@ import type { ProviderAdapter } from "../src/adapters/base";
 import { defaultConfig as baseDefaultConfig } from "../src/config";
 import { COMPACT_PROMPT, SUMMARY_PREFIX, decodeCompactionSummary, encodeCompactionSummary } from "../src/responses/compaction";
 import { compactRequest, responseRequest as respond } from "../src/server";
-import type { CodexProviderConfig } from "../src/types";
-import { extractChatGptTurnIdentity, extractChatGptTurnUserRevision } from "../src/adapters/chatgpt-web/environment";
+import type { CodexParsedRequest, CodexProviderConfig } from "../src/types";
+import { extractChatGptTurnEnvironment, extractChatGptTurnIdentity, extractChatGptTurnUserRevision } from "../src/adapters/chatgpt-web/environment";
 import { chatGptCompactionSourceExecutionKey, chatGptTurnExecutionKey } from "../src/adapters/chatgpt-web/turn-execution";
 
 const model = "chatgpt-web/high";
@@ -111,6 +111,208 @@ test("precompacts a production Web handoff with native Sol high and retains the 
     "Actual latest request",
     `${SUMMARY_PREFIX}\n${summary}`,
   ]);
+});
+
+test("precompacts an oversized normal Web turn even when Codex skips its compact endpoint", async () => {
+  const config = baseDefaultConfig("full");
+  config.proAvailable = true;
+  config.webDefaultEffort = "xhigh";
+  let upstreamBody: Record<string, unknown> | undefined;
+  let adapterInput: CodexParsedRequest | undefined;
+  const response = await responseRequest(new Request("http://127.0.0.1:17841/v1/responses", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test-native-token",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "chatgpt-web/default",
+      stream: false,
+      max_output_tokens: 1,
+      stop: ["END"],
+      background: true,
+      text: { verbosity: "low" },
+      client_metadata: {
+        "x-codex-turn-metadata": JSON.stringify({
+          thread_id: "thread_precompact",
+          turn_id: "turn_current",
+          sandbox: "danger-full-access",
+          workspaces: { "D:\\repo": {} },
+        }),
+      },
+      input: [
+        { type: "message", role: "developer", content: [{ type: "input_text", text: "history ".repeat(70_000) }] },
+        {
+          id: "msg_environment",
+          role: "user",
+          content: [{
+            type: "input_text",
+            text: "<environment_context><cwd>D:\\repo</cwd><sandbox_mode>danger-full-access</sandbox_mode><filesystem><workspace_roots><root>D:\\repo</root></workspace_roots></filesystem></environment_context>",
+          }],
+        },
+        { id: "msg_developer", role: "developer", content: [{ type: "input_text", text: "Current app instructions" }] },
+        {
+          id: "msg_active",
+          role: "user",
+          content: [{ type: "input_text", text: "Keep this latest request" }],
+        },
+      ],
+    }),
+  }), config, () => ({
+    name: "precompacted-normal-turn",
+    async runTurn(parsed, _incoming, emit) {
+      adapterInput = parsed;
+      emit({ type: "text_delta", text: "Completed after pre-compaction", phase: "final_answer" });
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+    },
+  }), {
+    rememberState: false,
+    fetchUpstream: async request => {
+      upstreamBody = await request.json() as Record<string, unknown>;
+      return Response.json({
+        status: "completed",
+        output: [{
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [{ type: "output_text", text: summary }],
+        }],
+      });
+    },
+  });
+
+  expect(response.status).toBe(200);
+  expect(upstreamBody).toMatchObject({ model: "gpt-5.6-sol", reasoning: { effort: "high" } });
+  expect(upstreamBody).not.toHaveProperty("max_output_tokens");
+  expect(upstreamBody).not.toHaveProperty("stop");
+  expect(upstreamBody).not.toHaveProperty("background");
+  expect(upstreamBody).not.toHaveProperty("text");
+  expect((upstreamBody!.input as unknown[]).at(-1)).toMatchObject({
+    role: "user",
+    content: [{ type: "input_text", text: COMPACT_PROMPT }],
+  });
+  expect(adapterInput!.context.messages.some(message => (
+    message.role === "user" && JSON.stringify(message.content).includes("Keep this latest request")
+  ))).toBeTrue();
+  expect(adapterInput!.context.messages.some(message => (
+    message.role === "user" && JSON.stringify(message.content).includes(summary)
+  ))).toBeTrue();
+  expect(adapterInput!.context.messages.some(message => (
+    message.role === "user" && JSON.stringify(message.content).includes("environment_context")
+  ))).toBeTrue();
+  expect(adapterInput!.context.messages.some(message => (
+    message.role === "developer" && JSON.stringify(message.content).includes("history ".repeat(100))
+  ))).toBeFalse();
+  expect(adapterInput!.context.messages.some(message => (
+    message.role === "developer" && JSON.stringify(message.content).includes("Current app instructions")
+  ))).toBeTrue();
+  expect(extractChatGptTurnEnvironment(adapterInput!).cwd).toBe("D:\\repo");
+});
+
+test("oversized string input is never summarized away or submitted above the cap", async () => {
+  const config = baseDefaultConfig("full");
+  config.proAvailable = true;
+  config.webDefaultEffort = "xhigh";
+  const instruction = "current instruction ".repeat(70_000);
+  let adapterStarted = false;
+  let upstreamBody: Record<string, unknown> | undefined;
+  const response = await responseRequest(new Request("http://127.0.0.1:17841/v1/responses", {
+    method: "POST",
+    headers: { authorization: "Bearer test-native-token", "content-type": "application/json" },
+    body: JSON.stringify({ model: "chatgpt-web/default", stream: false, input: instruction }),
+  }), config, () => {
+    adapterStarted = true;
+    throw new Error("oversized exact instruction must not reach the browser adapter");
+  }, {
+    rememberState: false,
+    fetchUpstream: async request => {
+      upstreamBody = await request.json() as Record<string, unknown>;
+      return Response.json({
+        status: "completed",
+        output: [{
+          type: "message", role: "assistant", status: "completed",
+          content: [{ type: "output_text", text: summary }],
+        }],
+      });
+    },
+  });
+
+  expect(response.status).toBe(400);
+  expect(adapterStarted).toBeFalse();
+  expect(JSON.stringify(upstreamBody!.input)).toContain(instruction.slice(0, 1_000));
+  expect(await response.text()).toContain("current Codex turn alone");
+});
+
+test("normal-turn precompaction preserves the current plaintext agent message", async () => {
+  const config = baseDefaultConfig("browser-only");
+  config.proAvailable = true;
+  config.webDefaultEffort = "xhigh";
+  let adapterInput: CodexParsedRequest | undefined;
+  const response = await responseRequest(new Request("http://127.0.0.1:17841/v1/responses", {
+    method: "POST",
+    headers: { authorization: "Bearer test-native-token", "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "chatgpt-web/default",
+      stream: false,
+      client_metadata: { "x-codex-turn-metadata": { thread_id: "thread_agent", turn_id: "turn_agent" } },
+      input: [
+        { type: "message", role: "developer", content: [{ type: "input_text", text: "history ".repeat(70_000) }] },
+        {
+          type: "agent_message",
+          author: "parent",
+          recipient: "child",
+          content: [{ type: "input_text", text: "Inspect the exact failure" }],
+          internal_chat_message_metadata_passthrough: { turn_id: "turn_agent" },
+        },
+      ],
+    }),
+  }), config, () => ({
+    name: "precompacted-agent-message",
+    async runTurn(parsed, _incoming, emit) {
+      adapterInput = parsed;
+      emit({ type: "done", stopReason: "stop", endTurn: true });
+    },
+  }), {
+    rememberState: false,
+    fetchUpstream: async () => Response.json({
+      status: "completed",
+      output: [{
+        type: "message", role: "assistant", status: "completed",
+        content: [{ type: "output_text", text: summary }],
+      }],
+    }),
+  });
+
+  expect(response.status).toBe(200);
+  expect(adapterInput!.context.messages).toContainEqual(expect.objectContaining({
+    role: "agentMessage",
+    author: "parent",
+    recipient: "child",
+    content: "Inspect the exact failure",
+  }));
+});
+
+test("oversized Web precompaction requires native Codex authorization", async () => {
+  const config = baseDefaultConfig("browser-only");
+  config.proAvailable = true;
+  config.webDefaultEffort = "xhigh";
+  let adapterStarted = false;
+  const response = await responseRequest(new Request("http://127.0.0.1:17841/v1/responses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "chatgpt-web/default",
+      stream: false,
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "history ".repeat(70_000) }] }],
+    }),
+  }), config, () => {
+    adapterStarted = true;
+    throw new Error("unauthorized oversized input must not reach the browser adapter");
+  }, { rememberState: false });
+
+  expect(response.status).toBe(401);
+  expect(adapterStarted).toBeFalse();
+  expect(await response.text()).toContain("Bearer authorization");
 });
 
 test("compacts ChatGPT Web v1 through a dedicated read-only browser summarization turn", async () => {

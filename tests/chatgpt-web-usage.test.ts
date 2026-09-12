@@ -57,7 +57,7 @@ test("Bigger Context compaction selects three parts before the legacy inline byt
 test("multipart planning leaves room for final attachments and execution instructions without losing history", () => {
   for (const scenario of [
     { proAvailable: false, images: 3, schema: false },
-    { proAvailable: true, images: 10, schema: false },
+    { proAvailable: true, images: 8, schema: false },
     { proAvailable: false, images: 0, schema: true },
   ]) {
     const caps = { ...capabilities, proAvailable: scenario.proAvailable };

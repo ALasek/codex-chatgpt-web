@@ -67,6 +67,10 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function isMessageItem(value: Record<string, unknown> | undefined): value is Record<string, unknown> {
+  return Boolean(value && (value.type === undefined || value.type === "message"));
+}
+
 function pathIdentity(value: string): string {
   const normalized = resolve(value);
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
@@ -172,7 +176,7 @@ function isUserOrParentInstruction(
   item: Record<string, unknown> | undefined,
   metadata?: Record<string, unknown>,
 ): item is Record<string, unknown> {
-  if (item?.type === "message" && item.role === "user") return !contextualUserMessage(item);
+  if (isMessageItem(item) && item.role === "user") return !contextualUserMessage(item);
   if (item?.type !== "agent_message" || typeof item.id !== "string" || !item.id
     || metadata?.subagent_kind !== "thread_spawn"
     || (metadata.request_kind !== "turn" && metadata.request_kind !== "compaction")
@@ -318,13 +322,13 @@ function environmentBeforeUser(input: unknown[], userIndex: number, expectedTurn
 
   let candidateIndex = userIndex - 1;
   let candidate = record(input[candidateIndex]);
-  while (candidate?.type === "message" && candidate.role === "developer") {
+  while (isMessageItem(candidate) && candidate.role === "developer") {
     const developerTurnId = itemTurnId(candidate);
     if (developerTurnId !== userTurnId) return undefined;
     candidateIndex -= 1;
     candidate = record(input[candidateIndex]);
   }
-  if (candidate?.type !== "message" || candidate.role !== "user") return undefined;
+  if (!isMessageItem(candidate) || candidate.role !== "user") return undefined;
 
   const candidateTurnId = itemTurnId(candidate);
   if (candidateTurnId !== userTurnId) return undefined;
@@ -478,14 +482,14 @@ function canonicalMetadataEnvironmentBeforeUser(
 
   let candidateIndex = userIndex - 1;
   let candidate = record(input[candidateIndex]);
-  while (candidate?.type === "message" && candidate.role === "developer") {
+  while (isMessageItem(candidate) && candidate.role === "developer") {
     const developerTurnId = itemTurnId(candidate);
     const serverOwnedId = typeof candidate.id === "string" && candidate.id.length > 0;
     if (developerTurnId === undefined ? !serverOwnedId : developerTurnId !== metadataTurnId) return undefined;
     candidateIndex -= 1;
     candidate = record(input[candidateIndex]);
   }
-  if (candidate?.type !== "message" || candidate.role !== "user" || typeof candidate.id !== "string" || !candidate.id) return undefined;
+  if (!isMessageItem(candidate) || candidate.role !== "user" || typeof candidate.id !== "string" || !candidate.id) return undefined;
   const candidateTurnId = itemTurnId(candidate);
   if (candidateTurnId !== undefined && candidateTurnId !== metadataTurnId) return undefined;
 
@@ -506,11 +510,55 @@ function canonicalMetadataEnvironmentBeforeUser(
   return undefined;
 }
 
+function environmentPreambleStart(input: unknown[], userIndex: number): number {
+  let index = userIndex - 1;
+  while (index >= 0) {
+    const item = record(input[index]);
+    if (!isMessageItem(item) || item.role !== "developer") break;
+    index -= 1;
+  }
+  return index;
+}
+
+/** Raw current-turn preamble range after the same provenance checks used for filesystem authority. */
+export function currentChatGptTurnPreambleRange(
+  parsed: CodexParsedRequest,
+): { start: number; end: number } | undefined {
+  const body = record(parsed._rawBody);
+  const input = Array.isArray(body?.input) ? body.input : [];
+  const metadata = clientTurnMetadata(parsed);
+  let activeUserIndex = -1;
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    if (isUserOrParentInstruction(record(input[index]), metadata)) {
+      activeUserIndex = index;
+      break;
+    }
+  }
+  if (activeUserIndex < 0) return undefined;
+  const turnId = typeof metadata?.turn_id === "string" ? metadata.turn_id : undefined;
+  const authenticated = (userIndex: number, requireMetadataBoundRoots = false): boolean => Boolean(
+    environmentBeforeUser(input, userIndex, turnId, metadata)
+    || canonicalMetadataEnvironmentBeforeUser(input, userIndex, metadata, requireMetadataBoundRoots),
+  );
+  if (authenticated(activeUserIndex)) {
+    return { start: environmentPreambleStart(input, activeUserIndex), end: activeUserIndex };
+  }
+  let crossedAssistantOutput = false;
+  for (let index = activeUserIndex - 1; index > 0; index -= 1) {
+    crossedAssistantOutput ||= hasAssistantOutputBetween(input, index, index + 1);
+    if (crossedAssistantOutput && itemTurnId(input[index]) !== turnId) continue;
+    if (authenticated(index, true)) {
+      return { start: environmentPreambleStart(input, index), end: activeUserIndex };
+    }
+  }
+  return undefined;
+}
+
 function hasAssistantOutputBetween(input: unknown[], startIndex: number, endIndex: number): boolean {
   for (let index = startIndex; index < endIndex; index += 1) {
     const item = record(input[index]);
     if (!item) continue;
-    if (item.type === "message" && item.role === "assistant") return true;
+    if (isMessageItem(item) && item.role === "assistant") return true;
     if (item.type === "function_call" || item.type === "reasoning") return true;
   }
   return false;

@@ -11,11 +11,13 @@ import {
 import { chatGptBrowserTabClosedError } from "./adapters/chatgpt-web/adapter-error";
 import {
   CHATGPT_TURN_REVISION_CONFLICT_MESSAGE,
+  currentChatGptTurnPreambleRange,
   extractChatGptTurnIdentity,
   extractCodexTurnIdentityFromBody,
   extractChatGptCompactionSourceRevision,
 } from "./adapters/chatgpt-web/environment";
 import { rememberCompactionContinuation } from "./adapters/chatgpt-web/compaction-continuation";
+import { estimateChatGptWebInputTokens } from "./adapters/chatgpt-web/usage";
 import { bridgeToResponsesSSE, buildResponseJSON, formatErrorResponse } from "./bridge";
 import type { AppConfig } from "./config";
 import { providerConfig } from "./config";
@@ -34,6 +36,7 @@ import {
   CHATGPT_WEB_LUNA_BACKEND_MODEL,
   isChatGptWebModelSlug,
   requireChatGptWebModelRoute,
+  resolveChatGptWebContextLimits,
   resolveChatGptWebModelPreference,
   type ChatGptWebModelRoute,
 } from "./chatgpt-web-models";
@@ -44,6 +47,7 @@ import {
   COMPACT_PROMPT,
   decodeCompactionSummary,
   extractCompactUserMessages,
+  SUMMARY_PREFIX,
 } from "./responses/compaction";
 import { parseRequest } from "./responses/parser";
 import { expandPreviousResponseInput, flushResponseState, rememberResponseState } from "./responses/state";
@@ -362,6 +366,136 @@ export interface ResponseRequestOptions {
   onAdapterEvent?: (event: AdapterEvent) => void;
   /** Bind the physical HTTP stream to the exact native Codex turn that owns it. */
   onTurnIdentity?: (identity: NativeCodexTurnIdentity) => void;
+  /** Override native Codex transport in tests and embedded servers. */
+  fetchUpstream?: NativeFetch;
+}
+
+async function compactInputWithNativeSol(
+  req: Request,
+  raw: Record<string, unknown>,
+  fetchUpstream?: NativeFetch,
+): Promise<{ summary?: string; error?: Response }> {
+  const authorization = req.headers.get("authorization") ?? "";
+  if (!authorization.startsWith("Bearer ") || authorization.length <= "Bearer ".length) {
+    return {
+      error: formatErrorResponse(
+        401,
+        "authentication_error",
+        "Native Sol pre-compaction requires incoming Codex Bearer authorization",
+      ),
+    };
+  }
+  const input = typeof raw.input === "string"
+    ? [{ type: "message", role: "user", content: [{ type: "input_text", text: raw.input }] }]
+    : Array.isArray(raw.input) ? raw.input : [];
+  const nativeBody: Record<string, unknown> = {
+    model: "gpt-5.6-sol",
+    stream: false,
+    reasoning: { effort: "high" },
+    input: [
+      ...input,
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: COMPACT_PROMPT }],
+      },
+    ],
+  };
+  const headers = new Headers(req.headers);
+  headers.set("content-type", "application/json");
+  headers.delete("content-encoding");
+  const nativeSummaryRequest = new Request("http://127.0.0.1/v1/responses", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(nativeBody),
+    signal: req.signal,
+  });
+  let response: Response;
+  try {
+    response = await forwardNativeCodexRequest(nativeSummaryRequest, "responses", fetchUpstream, nativeBody);
+  } catch (error) {
+    return { error: formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error)) };
+  }
+  if (!response.ok) return { error: response };
+  let body: { output?: unknown[]; status?: unknown; error?: unknown };
+  try {
+    body = await response.json() as typeof body;
+  } catch {
+    return { error: formatErrorResponse(502, "invalid_response_error", "Native Sol compaction returned invalid JSON") };
+  }
+  if (body.error || (body.status !== undefined && body.status !== "completed")) {
+    return {
+      error: formatErrorResponse(
+        502,
+        "upstream_error",
+        `Native Sol compaction failed (status: ${String(body.status ?? "unknown")})`,
+      ),
+    };
+  }
+  const summary = (body.output ?? []).flatMap(item => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const message = item as { type?: unknown; role?: unknown; phase?: unknown; content?: unknown };
+    if (message.type !== "message" || message.role !== "assistant" || message.phase === "commentary"
+      || !Array.isArray(message.content)) return [];
+    return message.content.flatMap(block => {
+      if (!block || typeof block !== "object" || Array.isArray(block)) return [];
+      const content = block as { type?: unknown; text?: unknown };
+      return (content.type === "output_text" || content.type === "text") && typeof content.text === "string"
+        ? [content.text]
+        : [];
+    });
+  }).join("\n").trim();
+  if (!summary) {
+    return { error: formatErrorResponse(502, "invalid_response_error", "Native Sol compaction produced an empty summary") };
+  }
+  return { summary };
+}
+
+function currentTurnInput(
+  raw: Record<string, unknown>,
+  parsed: CodexParsedRequest,
+  summary: string,
+): unknown[] {
+  const input = typeof raw.input === "string"
+    ? [{ type: "message", role: "user", content: [{ type: "input_text", text: raw.input }] }]
+    : Array.isArray(raw.input) ? raw.input : [];
+  const turnId = extractCodexTurnIdentityFromBody(raw).turnId;
+  const itemTurnId = (value: unknown): string | undefined => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const metadata = (value as { internal_chat_message_metadata_passthrough?: unknown })
+      .internal_chat_message_metadata_passthrough;
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined;
+    const candidate = (metadata as { turn_id?: unknown }).turn_id;
+    return typeof candidate === "string" ? candidate : undefined;
+  };
+  const selected = new Set<number>();
+  const preamble = currentChatGptTurnPreambleRange(parsed);
+  if (preamble) {
+    for (let index = preamble.start; index <= preamble.end; index += 1) selected.add(index);
+  }
+  if (turnId) {
+    input.forEach((item, index) => {
+      if (itemTurnId(item) === turnId) selected.add(index);
+    });
+  }
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    const item = input[index];
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const record = item as { type?: unknown; role?: unknown };
+    if (record.type === "agent_message"
+      || ((record.type === undefined || record.type === "message") && record.role === "user")) {
+      selected.add(index);
+      break;
+    }
+  }
+  return [
+    {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: `${SUMMARY_PREFIX}\n${summary}` }],
+    },
+    ...input.filter((_item, index) => selected.has(index)).map(item => structuredClone(item)),
+  ];
 }
 
 export function routeChatGptWebRequest(parsed: CodexParsedRequest, config: AppConfig): ChatGptWebModelRoute {
@@ -488,7 +622,7 @@ export async function responseRequest(
   const requestedPreviousResponseId = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { previous_response_id?: unknown }).previous_response_id
     : undefined;
-  const expanded = expandPreviousResponseInput(raw);
+  let expanded = expandPreviousResponseInput(raw);
   let parsed: CodexParsedRequest;
   let route: ChatGptWebModelRoute;
   try {
@@ -515,6 +649,58 @@ export async function responseRequest(
       "invalid_request_error",
       "Local continuation state for previous_response_id is unavailable; refusing to run ChatGPT Web with partial Codex context. Compact the Codex task or start a new task before retrying.",
     );
+  }
+
+  if (config.purpose !== "dev-harness"
+    && !parsed._compactionRequest
+    && route.interactionMode === "automatic"
+    && route.backendModel !== CHATGPT_WEB_LUNA_BACKEND_MODEL) {
+    const capabilities = {
+      localToolsEnabled: config.mode === "full",
+      solAvailable: config.solAvailable,
+      proAvailable: config.proAvailable,
+    };
+    const estimatedInputTokens = estimateChatGptWebInputTokens(parsed, capabilities);
+    const { autoCompactTokenLimit } = resolveChatGptWebContextLimits(
+      route.backendModel,
+      route.adapterEffort,
+      config,
+    );
+    if (estimatedInputTokens >= autoCompactTokenLimit) {
+      const compacted = await compactInputWithNativeSol(
+        req,
+        expanded as Record<string, unknown>,
+        options.fetchUpstream,
+      );
+      if (compacted.error) return compacted.error;
+      expanded = {
+        ...(expanded as Record<string, unknown>),
+        input: currentTurnInput(expanded as Record<string, unknown>, parsed, compacted.summary!),
+      };
+      delete (expanded as Record<string, unknown>).previous_response_id;
+      try {
+        parsed = parseRequest(expanded);
+        route = routeChatGptWebRequest(parsed, config);
+      } catch (error) {
+        return formatErrorResponse(500, "server_error", `Native pre-compaction produced invalid Web input: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const reducedInputTokens = estimateChatGptWebInputTokens(parsed, capabilities);
+      if (reducedInputTokens >= autoCompactTokenLimit) {
+        return formatErrorResponse(
+          400,
+          "invalid_request_error",
+          `The current Codex turn alone is estimated at ${reducedInputTokens.toLocaleString("en-US")} input tokens after preserving its exact instruction and environment, which exceeds the ${autoCompactTokenLimit.toLocaleString("en-US")}-token Web handoff cap. Shorten the latest request or remove large current-turn attachments before retrying.`,
+        );
+      }
+      console.info(`[codex-chatgpt-web] native_precompaction_applied ${JSON.stringify({
+        estimatedInputTokens,
+        reducedInputTokens,
+        autoCompactTokenLimit,
+        retainedItems: Array.isArray((expanded as Record<string, unknown>).input)
+          ? ((expanded as Record<string, unknown>).input as unknown[]).length
+          : 0,
+      })}`);
+    }
   }
 
   const compaction = parsed._compactionRequest === true;
@@ -730,70 +916,14 @@ export async function compactRequest(
   }
   const input = Array.isArray(raw.input) ? raw.input : [];
   if (config.purpose !== "dev-harness") {
-    const nativeBody: Record<string, unknown> = {
-      ...raw,
-      model: "gpt-5.6-sol",
-      stream: false,
-      reasoning: { effort: "high" },
-      input: [
-        ...input,
-        {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: COMPACT_PROMPT }],
-        },
-      ],
-    };
-    delete nativeBody.tools;
-    delete nativeBody.tool_choice;
-    delete nativeBody.parallel_tool_calls;
-    delete nativeBody.previous_response_id;
-    const headers = new Headers(req.headers);
-    headers.set("content-type", "application/json");
-    headers.delete("content-encoding");
-    const nativeSummaryRequest = new Request("http://127.0.0.1/v1/responses", {
-      method: "POST",
-      headers,
-      body: JSON.stringify(nativeBody),
-      signal: req.signal,
+    const compacted = await compactInputWithNativeSol(req, raw, fetchUpstream);
+    return compacted.error ?? Response.json({
+      output: buildCompactV1Output(extractCompactUserMessages(
+        typeof raw.input === "string"
+          ? [{ type: "message", role: "user", content: [{ type: "input_text", text: raw.input }] }]
+          : input,
+      ), compacted.summary!),
     });
-    let response: Response;
-    try {
-      response = await forwardNativeCodexRequest(nativeSummaryRequest, "responses", fetchUpstream, nativeBody);
-    } catch (error) {
-      return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
-    }
-    if (!response.ok) return response;
-    let body: { output?: unknown[]; status?: unknown; error?: unknown };
-    try {
-      body = await response.json() as typeof body;
-    } catch {
-      return formatErrorResponse(502, "invalid_response_error", "Native Sol compaction returned invalid JSON");
-    }
-    if (body.error || (body.status !== undefined && body.status !== "completed")) {
-      return formatErrorResponse(
-        502,
-        "upstream_error",
-        `Native Sol compaction failed (status: ${String(body.status ?? "unknown")})`,
-      );
-    }
-    const summary = (body.output ?? []).flatMap(item => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-      const message = item as { type?: unknown; role?: unknown; phase?: unknown; content?: unknown };
-      if (message.type !== "message" || message.role !== "assistant" || message.phase === "commentary"
-        || !Array.isArray(message.content)) return [];
-      return message.content.flatMap(block => {
-        if (!block || typeof block !== "object" || Array.isArray(block)) return [];
-        const content = block as { type?: unknown; text?: unknown };
-        return (content.type === "output_text" || content.type === "text") && typeof content.text === "string"
-          ? [content.text]
-          : [];
-      });
-    }).join("\n").trim();
-    if (!summary) {
-      return formatErrorResponse(502, "invalid_response_error", "Native Sol compaction produced an empty summary");
-    }
-    return Response.json({ output: buildCompactV1Output(extractCompactUserMessages(input), summary) });
   }
   const headers = new Headers(req.headers);
   headers.set("content-type", "application/json");
@@ -1069,7 +1199,7 @@ export function startServer(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity },
+            { onTurnIdentity: bindIdentity, fetchUpstream: dependencies.fetchUpstream },
           ),
           req.signal,
           process.platform,
