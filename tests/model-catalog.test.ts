@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { defaultConfig } from "../src/config";
 import {
   availableChatGptWebModelRoutes,
+  CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW,
   CHATGPT_WEB_DEFAULT_MODEL_SLUG,
   CHATGPT_WEB_ZERO_RISK_CONTEXT_WINDOW,
   CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE,
   CHATGPT_WEB_ZERO_RISK_PRO_MODEL_ROUTE,
+  resolveChatGptWebCodexContextLimits,
   resolveChatGptWebContextLimits,
 } from "../src/chatgpt-web-models";
 import { augmentNativeModelCatalog } from "../src/model-catalog";
@@ -63,7 +65,7 @@ describe("native /models augmentation", () => {
     expect(web.map(model => model.display_name)).toEqual(routes.map(route => route.displayName));
     for (const [index, model] of web.entries()) {
       const route = routes[index]!;
-      const limits = resolveChatGptWebContextLimits(route.backendModel, route.adapterEffort, config);
+      const limits = resolveChatGptWebCodexContextLimits(route, config);
       expect(model).toMatchObject({
         slug: route.slug,
         display_name: route.displayName,
@@ -85,17 +87,17 @@ describe("native /models augmentation", () => {
     }
   });
 
-  test("publishes Bigger Context limits in the Codex model catalog", () => {
+  test("keeps Codex out of automatic Web compaction when Bigger Context is enabled", () => {
     const config = defaultConfig("full");
     config.proAvailable = true;
     config.experimentalBiggerContext = true;
     const models = augmentNativeModelCatalog(source(), config).models as Array<Record<string, unknown>>;
     const web = models.find(model => model.slug === CHATGPT_WEB_DEFAULT_MODEL_SLUG)!;
-    expect(web.context_window).toBe(270_000);
-    expect(web.auto_compact_token_limit).toBe(180_000);
+    expect(web.context_window).toBe(CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW);
+    expect(web.auto_compact_token_limit).toBe(CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW);
   });
 
-  test("publishes the 60k compaction cap for launcher-selected Sol Extra high", () => {
+  test("publishes a logical transcript window while retaining the 60k physical Sol cap", () => {
     const config = defaultConfig("full");
     config.proAvailable = true;
     config.webDefaultEffort = "xhigh";
@@ -103,9 +105,14 @@ describe("native /models augmentation", () => {
     const web = models.find(model => model.slug === CHATGPT_WEB_DEFAULT_MODEL_SLUG)!;
 
     expect(web).toMatchObject({
-      context_window: 90_000,
-      effective_context_window_percent: 67,
-      auto_compact_token_limit: 60_000,
+      context_window: CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW,
+      effective_context_window_percent: 100,
+      auto_compact_token_limit: CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW,
+    });
+    expect(resolveChatGptWebContextLimits("gpt-5.6-sol", "xhigh", config)).toEqual({
+      contextWindow: 90_000,
+      effectiveContextWindowPercent: 67,
+      autoCompactTokenLimit: 60_000,
     });
   });
 
@@ -185,7 +192,11 @@ describe("native /models augmentation", () => {
       effectiveContextWindowPercent: model.effective_context_window_percent,
       autoCompactTokenLimit: model.auto_compact_token_limit,
     }))).toEqual([
-      { contextWindow: 90_000, effectiveContextWindowPercent: 67, autoCompactTokenLimit: 60_000 },
+      {
+        contextWindow: CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW,
+        effectiveContextWindowPercent: 100,
+        autoCompactTokenLimit: CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW,
+      },
     ]);
   });
 
@@ -263,11 +274,7 @@ describe("native /models augmentation", () => {
     expect(models[1]!.auto_compact_token_limit).toBe(270_000);
     for (const [index, model] of models.slice(3).entries()) {
       const route = availableChatGptWebModelRoutes(config)[index]!;
-      const limits = resolveChatGptWebContextLimits(
-        route.backendModel,
-        route.adapterEffort,
-        config,
-      );
+      const limits = resolveChatGptWebCodexContextLimits(route, config);
       expect(model.context_window).toBe(limits.contextWindow);
       expect(model.max_context_window).toBe(limits.contextWindow);
       expect(model.effective_context_window_percent).toBe(limits.effectiveContextWindowPercent);

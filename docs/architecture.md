@@ -83,12 +83,11 @@ and development connectors installed without renaming, refreshing, or deleting e
 ## Browser lifecycle
 
 The desktop launcher owns one persistent Electron partition and up to five task-bound browser
-tabs. Each task/model/effort/compaction epoch owns one exact `WebContentsView` lease; sequential
-native messages reuse that surface, while each message receives a fresh turn-bound MCP token and
-keeps all of its MCP tool rounds inside one ChatGPT response. Compaction asks the same retained Web
-agent for a one-shot structured checkpoint, waits for the response and physical helper cleanup,
-then closes the old surface. The next epoch gets a new Temporary Chat. Model messages never copy
-state between tabs. Tabs share only the local login
+tabs. Each task/model/effort epoch owns one exact `WebContentsView` lease; sequential native
+messages reuse that surface, while each message receives a fresh turn-bound MCP token and keeps all
+of its MCP tool rounds inside one ChatGPT response. Automatic routes advertise a separate large
+logical transcript window so Codex does not interrupt the browser-owned turn for compaction. Model
+messages never copy state between tabs. Tabs share only the local login
 partition and keep independent documents and lifecycles. Closing a running tab destroys its page
 and terminates that browser turn. A sixth concurrent turn fails explicitly; the cap avoids excessive
 parallel traffic that could trigger account abuse controls.
@@ -125,15 +124,15 @@ The pasted task carries one opaque `request_id` for routing concurrent requests.
 sequencing lives in the Zero Risk MCP server metadata, not in user-authored imperative text; the
 per-tab nonce used to validate the Launcher confirmation never leaves the local runtime.
 
-The appended models advertise the authenticated account's context window and a conservative
-auto-compaction reserve. Plus Medium/High pre-compacts at 60,000 tokens after a real 77,000-token
-inline handoff made the ChatGPT renderer unresponsive. Usage is counted with the GPT-5 tokenizer plus fixed platform/image
-reserves, rather than inferred from character length. The ChatGPT composer also has an independent
-inline-size boundary: usage accounting asks Codex to compact before that boundary, and a prompt
-that still exceeds the proven hard ceiling fails explicitly before any browser turn opens.
+Automatic appended models advertise a large logical Codex transcript window while the adapter
+separately enforces the authenticated account's physical browser limits. Plus Medium/High
+pre-compacts an initial handoff at 60,000 tokens after a real 77,000-token inline handoff made the
+ChatGPT renderer unresponsive. Usage is counted with the GPT-5 tokenizer plus fixed platform/image
+reserves, rather than inferred from character length. A prompt that still exceeds the proven hard
+ceiling after pre-compaction fails explicitly before any browser turn opens.
 Top-level `model_context_window` raises only the proxied native rows' advertised maximum, allowing
 Codex to apply its own configured context override without clamping. Routed ChatGPT Web models
-retain their measured adapter-owned limits.
+retain their separate bridge-owned logical window.
 
 Bigger Context partitions complete ordered records against each message's available token and
 composer budgets. Inert stages carry text; the final message also carries all retained attachments,
@@ -141,12 +140,12 @@ the execution contract and any output schema. Their reserves are deducted before
 then preflight checks the actual compiled messages and total transaction. The selected execution
 effort, attachment references and three-part maximum remain unchanged.
 
-In production Automatic mode, routed v1 compaction never opens ChatGPT. The bridge sends canonical
-Codex history to native `gpt-5.6-sol` with High reasoning and no tools, then wraps its text summary
-in the bridge checkpoint format. Codex receives recent real user messages separately from that
-summary, newest first within the retained-message budget, so the current request is not reduced to
-summary prose. The isolated DEV harness still exercises the browser compaction path. Routed v2
-compaction retains its existing task-bound Web handoff path; production setup currently disables v2.
+In production Automatic mode, an oversized initial handoff never opens ChatGPT before it is
+bounded. The bridge sends canonical Codex history to native `gpt-5.6-sol` with High reasoning and
+no tools, then keeps recent real user messages and the current request outside the summary. Once
+the Web turn starts, the browser conversation owns its context lifecycle and Codex does not insert
+another compaction boundary into that active response. The isolated DEV harness still exercises
+the explicit browser-compaction protocol for compatibility coverage.
 
 Zero Risk always advertises a fixed three-times compaction interval without enabling
 Bigger Context multipart transport. At that boundary its active ChatGPT response receives the

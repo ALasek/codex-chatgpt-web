@@ -38,9 +38,9 @@ Codex task ──Responses + SSE──▶ codex-chatgpt-web ──embedded brows
      └──────── native UI, context, images, tracing, and tool lifecycle ──────┘
 ```
 
-Codex keeps the native task, context lifecycle, UI, and tool harness. The local Responses bridge
-routes only the selected model task through a task-bound ChatGPT Temporary Chat; in full mode, MCP
-connects ChatGPT back to the tools of that same Codex task until its next compaction boundary.
+Codex keeps the native task, transcript, UI, and tool harness. The local Responses bridge routes
+only the selected model task through a task-bound ChatGPT Temporary Chat; in full mode, MCP
+connects ChatGPT back to the tools of that same Codex task for the complete browser-owned turn.
 
 > [!TIP]
 > I also built **[ChatGPT Persona Voice](https://github.com/miuuyy/ChatGPT-Persona-Voice)**, a local
@@ -57,7 +57,7 @@ connects ChatGPT back to the tools of that same Codex task until its next compac
   including Pro, the active task's filesystem, shell, images, approvals, and configured tools/apps.
 - **Continuous task sessions and native pre-compaction.** Sequential messages reuse one task-bound
   Temporary Chat. Before an oversized task switches into Web, native GPT-5.6 Sol at High writes a
-  checkpoint; the bridge retains recent real user messages separately and starts a clean Web chat.
+  checkpoint; after handoff, Codex does not interrupt the live Web turn for mid-task compaction.
 - **One cross-platform launcher.** The macOS, Windows, and Linux app owns sign-in, model setup, MCP
   guidance, health checks, safe diagnostics, and up to five visible task-bound browser tabs.
 - **Fail-closed behavior.** Missing models, tools, or changed ChatGPT UI produce explicit errors
@@ -147,8 +147,9 @@ The launcher's **MCP** page guides the complete setup. For the exact clicks, see
 >
 > See [Limits](https://github.com/miuuyy/codex-chatgpt-web/discussions/309) for the current
 > ChatGPT message allowances for **GPT-5.6 Sol Pro** and **GPT-6 Astra**. Context limits depend on
-> the account type and selected effort. Plus Medium/High advertises a measured 90,000-token window
-> and now pre-compacts at 60,000 tokens, or 180,000 tokens with experimental **3× context** enabled.
+> the account type and selected effort. Plus Medium/High pre-compacts an initial handoff at 60,000
+> tokens, or 180,000 tokens with experimental **3× context** enabled. The active browser turn then
+> owns its context lifecycle instead of being interrupted by Codex compaction.
 
 1. Finish the required setup, open **MCP**, create the Tunnel and regular API key, then press
    **Connect harness**.

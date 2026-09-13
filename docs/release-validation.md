@@ -22,8 +22,9 @@ Run this list on a maintained Windows 11 x64 machine with a real ChatGPT account
 4. Complete one Browser-only turn and verify streamed commentary plus the final answer.
 5. Configure the `Codex Native2` connector, run **Verify runtime**, and complete one Full-mode local
    tool turn. Repeat with Pro when the account exposes Pro.
-6. Drive a chat past the compaction threshold and prove that it continues after compaction without
-   a duplicate or orphaned browser turn.
+6. Start an oversized task and prove native Sol pre-compacts it before the first browser handoff;
+   then drive the live Web response past the physical threshold and prove Codex does not interrupt
+   it with another Temporary Chat or compaction request.
 7. On a clean install, prove that setup offers both interaction modes and defaults to With
    Automation. Select Zero Risk and prove that Codex shows exactly one generic Web model after
    restart, a retained chat receives only the next prompt, and

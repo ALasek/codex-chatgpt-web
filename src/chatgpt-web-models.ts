@@ -79,11 +79,14 @@ export const CHATGPT_WEB_PRO_INSTANT_COMPOSER_CHAR_LIMIT = 545_000;
 export const CHATGPT_WEB_PRO_REASONING_COMPOSER_CHAR_LIMIT = 1_045_000;
 export const CHATGPT_WEB_PRO_MODEL_COMPOSER_CHAR_LIMIT = 1_635_000;
 /**
- * The underlying Luna model owns this context window. ChatGPT Free's much smaller browser request
- * envelope is enforced separately at the browser boundary; rolling checkpoints keep completed
- * history out of later browser requests without asking Codex to compact its canonical history.
+ * Codex owns the canonical transcript, but an automatic Web turn owns its live context after the
+ * initial browser handoff. Advertise a deliberately large logical window so Codex does not stop
+ * that browser turn for its own mid-turn compaction. Physical browser limits remain enforced by
+ * `resolveChatGptWebContextLimits` before the turn starts.
  */
-export const CHATGPT_WEB_LUNA_CONTEXT_WINDOW = 1_050_000;
+export const CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW = 1_050_000;
+/** Luna uses the same logical window while its smaller request envelope is enforced separately. */
+export const CHATGPT_WEB_LUNA_CONTEXT_WINDOW = CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW;
 export const CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER = 3;
 
 export interface ChatGptWebContextLimits {
@@ -253,6 +256,20 @@ export interface ChatGptWebZeroRiskModelRoute extends ChatGptWebModelRouteBase {
 }
 
 export type ChatGptWebModelRoute = ChatGptWebAutomaticModelRoute | ChatGptWebZeroRiskModelRoute;
+
+/** Resolve the logical window exposed to Codex independently of the browser transport window. */
+export function resolveChatGptWebCodexContextLimits(
+  route: ChatGptWebModelRoute,
+  capabilities: ChatGptWebAccountCapabilities,
+): ChatGptWebContextLimits {
+  if (route.interactionMode === "automatic") {
+    return contextLimits(
+      CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW,
+      CHATGPT_WEB_CODEX_TRANSCRIPT_WINDOW,
+    );
+  }
+  return resolveChatGptWebContextLimits(route.backendModel, route.adapterEffort, capabilities);
+}
 
 export interface ChatGptWebAccountCapabilities {
   solAvailable: boolean;
